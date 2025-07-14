@@ -4,3 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+futures = "0.3.31"
+iced = "0.13.1"
+iced_futures = "0.13.2"
+magic = "0.16.2"
+anyhow = "1.0.98"
+async-stream-lite = "0.2.0"
+axum = "0.8.4"
+ort = "=2.0.0-rc.10"
+rand = "0.9.1"
+serde = "1.0.219"
+tokenizers = "0.21.1"
+tokio = "1.45.1"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3", default-features = false, features = [ "env-filter", "fmt" ] }

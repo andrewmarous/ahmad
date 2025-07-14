@@ -136,3 +136,4 @@ async fn generate(
         .collect();
     Sse::new(generate_stream(tokenizer, session, tokens, GEN_TOKENS)).keep_alive(KeepAlive::new())
 }
+
