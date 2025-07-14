@@ -36,7 +36,12 @@ pub async fn create() -> anyhow::Result<()> {
     let mut session = Session::builder()?
     .with_optimization_level(GraphOptimizationLevel::Level3)?
     .with_intra_threads(4)?
-    .commit_from_file("")?;
+    .commit_from_file(
+            Path::new(env!("MODEL_STORE_ROOT"))
+            .parent()
+            .unwrap()
+            .join("TODO: add model filename")
+        )?;
 
     // Load the tokenizer and encode the prompt into a sequence of tokens
     let tokenizer = Tokenizer::from_file(

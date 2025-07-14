@@ -1,10 +1,17 @@
 use std::ffi::OsString;
 use std::path::{self, PathBuf};
 
+use futures::Stream;
 use iced::widget::{button, column, progress_bar, row, text_editor, text_input};
 use iced::{Element, Task};
 
+use crate::agent::agent;
+
 pub mod agent;
+
+struct Agent {
+    task: Task<Message>
+}
 
 #[derive(Default)]
 struct UserTextEditor {
@@ -26,7 +33,8 @@ struct App {
     user: UserTextEditor,
     out_path: AgentTextInput,
     progress: AgentProgressBar,
-    errors: String
+    errors: String,
+    agent: Agent
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +118,28 @@ impl AgentProgressBar {
     }
 }
 
+// need this for Task to work
+impl Default for Agent {
+    fn default() -> Self {
+        Self {
+            task: Task::none()
+        }
+    }
+}
+
+impl Agent {
+    pub fn new() -> () {
+        match agent::agent::initialize() {
+            Ok(_) => (),
+            Err(e) => panic!("Error initializing model: {}", e.to_string().as_str())
+        }
+    }
+
+    pub fn request() {
+
+    }
+}
+
 impl App {
     fn new() -> Self {
         Self {
@@ -117,6 +147,7 @@ impl App {
             out_path: AgentTextInput::new(),
             progress: AgentProgressBar::new(),
             errors: String::from("No errors yet. Happy trails!"),
+            agent: Agent::default()
         }
     }
 
@@ -166,9 +197,9 @@ impl App {
 
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(50.0));
                 Task::run(
-                    agent::request_response_stream(
-                        &state.user.content.text(),
-                        &state.out_path.content
+                    agent::agent::request_response_stream(
+                        state.user.content.text().clone(),
+                        state.out_path.content.clone()
                     ),
                     |res| match res {
                         Ok(s) => {
@@ -183,13 +214,12 @@ impl App {
                                 state.errors.push_str(response);
                             }
                         }
-                        Err(e) => {
-                            state.errors.push_str(e);
+                        Err(_) => {
                             // update other state based on errors?
                             return;
                         }
                     }
-                )
+                );
             },
             _ => {}
         }
@@ -197,8 +227,5 @@ impl App {
 }
 
 pub fn main() -> iced::Result {
-    // initialize chatboxes and labels
-
-    // run UI elements
-    iced::run("", ModelInterface::update, ModelInterface::view)
+    iced::run(App::new, App::update, App::view)
 }
