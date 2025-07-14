@@ -71,7 +71,7 @@ impl AgentTextInput {
     }
 
     fn view(state: &Self) -> Element<'_, Message> {
-        text_input("path/to/your/output_folder", state.content.to_str().unwrap_or(""))
+        text_input("path/to/your/output.midi", state.content.to_str().unwrap_or(""))
             .on_input(Message::OutputPathChanged)
             .into()
     }
@@ -112,7 +112,6 @@ impl AgentProgressBar {
 
 impl App {
     fn new() -> Self {
-
         Self {
             user: UserTextEditor::new(),
             out_path: AgentTextInput::new(),
@@ -165,16 +164,29 @@ impl App {
                     return;
                 }
 
+                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(50.0));
                 Task::run(
-                    agent::request_response(
+                    agent::request_response_stream(
                         &state.user.content.text(),
                         &state.out_path.content
                     ),
                     |res| match res {
-                        Ok(pct) => Message::AgentProgressUpdated(pct),
+                        Ok(s) => {
+                            if let Ok(pct) = s.parse() {
+                                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(pct))
+                            } else {
+                                let content = state.out_path.content
+                                    .as_os_str()
+                                    .to_str()
+                                    .expect("Output filepath should be valid.");
+                                let response = format!("Generated MIDI successfully saved to: {}", content).as_str();
+                                state.errors.push_str(response);
+                            }
+                        }
                         Err(e) => {
-                                state.errors.push_str(e);
-                                Message::AgentError
+                            state.errors.push_str(e);
+                            // update other state based on errors?
+                            return;
                         }
                     }
                 )

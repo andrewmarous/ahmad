@@ -29,6 +29,7 @@ pub async fn request_response_stream(prompt: &String, output_path: &PathBuf) -> 
                 .map_err(|_| ())?;
 
             let mut buf = Vec::new();
+
             // TODO: finish tcp logic
         }
     )
