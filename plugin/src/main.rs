@@ -1,17 +1,12 @@
-use std::ffi::OsString;
-use std::error::Error;
-use std::path::{self, PathBuf};
+use std::path::PathBuf;
 
-use futures::Stream;
+use anyhow::Error;
 use iced::widget::{button, column, progress_bar, row, text_editor, text_input};
-use iced::{Element, Task, Subscription};
+use iced::{Element, Task};
 
-pub mod agent;
+mod agent;
 
-struct Agent {
-    task: Task<Message>,
-    is_generating: bool
-}
+struct Agent;
 
 #[derive(Default)]
 struct UserTextEditor {
@@ -34,7 +29,6 @@ struct App {
     out_path: AgentTextInput,
     progress: AgentProgressBar,
     errors: String,
-    agent: Agent
 }
 
 #[derive(Debug, Clone)]
@@ -120,60 +114,64 @@ impl AgentProgressBar {
 }
 
 // need this for Task to work
-impl Default for Agent {
-    fn default() -> Self {
-        Self {
-            task: Task::none(),
-            is_generating: false
-        }
-    }
-}
+// impl Default for Agent {
+//     fn default() -> Self {
+//         Self {
+//             task: Task::none(),
+//             is_generating: false
+//         }
+//     }
+// }
 
 impl Agent {
-    pub fn new() -> () {
-        match agent::agent::initialize() {
-            Ok(_) => (),
-            Err(e) => panic!("Error initializing model: {}", e.to_string().as_str())
-        }
+    pub fn new() -> Task<Message> {
+        Task::run(
+            agent::agent::initialize(),
+            move |res | match res {
+                Ok(_) => {
+                    Message::Reset
+                },
+                Err(_) => {
+                    Message::AgentError
+                }
+            }
+        )
     }
 
-    pub fn request(&mut self, prompt: String, filepath: PathBuf) -> () {
-        self.task = Task::run(
+    pub fn request(prompt: String, filepath: PathBuf) -> Task<Message> {
+        Task::run(
             agent::agent::request_response_stream(
                 prompt.clone(),
                 filepath.clone()
             ),
             move |res| match res {
                 Ok(s) => {
-                    // if let Ok(pct) = s.parse() {
-                    //     Message::AgentProgressUpdated(pct)
-                    // } else {
-                    //     let content = filepath
-                    //         .as_os_str()
-                    //         .to_str()
-                    //         .expect("Output filepath should be valid.");
-                    //     let fmtstr = format!("Generated MIDI successfully saved to: {}", content);
-                    //     Message::ResponseComplete(String::from(fmtstr.as_str()))
-                    // }
-                    let fmtstr = format!("Generated MIDI successfully saved to: {}", s);
-                    Message::ResponseComplete(fmtstr.to_owned())
+                    if let Ok(pct) = s.parse() {
+                        Message::AgentProgressUpdated(pct)
+                    } else {
+                        let content = filepath
+                            .as_os_str()
+                            .to_str()
+                            .expect("Output filepath should be valid.");
+                        Message::ResponseComplete(content.to_string())
+                    }
                 }
                 Err(_) => {
                     Message::AgentError
                 }
             }
-        );
+        )
     }
 }
 
 impl App {
     fn new() -> Self {
+        Agent::new();
         Self {
             user: UserTextEditor::new(),
             out_path: AgentTextInput::new(),
             progress: AgentProgressBar::new(),
             errors: String::from("No errors yet. Happy trails!"),
-            agent: Agent::default()
         }
     }
 
@@ -205,12 +203,12 @@ impl App {
             },
             Message::PromptSubmitted => {
                 // check for errors
-                state.errors.clear();
-                let Some(filepath) = state.out_path.content.to_str() else {
-                    state.errors.push_str("Error: no output filepath defined. Please define where
-                                           you'd like the generated MIDI to go.\n");
-                    return Task::none()
-                };
+                // state.errors.clear();
+                // let Some(_) = state.out_path.content.to_str() else {
+                //     state.errors.push_str("Error: no output filepath defined. Please define where
+                //                            you'd like the generated MIDI to go.\n");
+                //     return Task::none()
+                // };
 
                 if !state.out_path.content.is_dir() {
                     let filename = match state.out_path.content.file_name() {
@@ -225,32 +223,44 @@ impl App {
                 }
 
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(50.0));
-                state.agent.request(
+                Agent::request(
                     state.user.content.text().to_owned(),
-                    state.out_path.content.to_owned());
+                    state.out_path.content.to_owned(),
+                )
+            },
+            Message::AgentError => {
+                state.errors.push_str("Error: agent failed generation. Check dev logs for more detail.\n");
                 Task::none()
-
+            },
+            Message::ResponseComplete(user_msg) => {
+                state.errors.push_str(&user_msg);
+                Task::none()
+            },
+            Message::Reset => {
+                state.errors.clear();
+                state.user.content = text_editor::Content::new();
+                state.out_path.content = PathBuf::new();
+                Task::none()
             },
             _ => { Task::none() }
         }
     }
 
-    fn subscription(&self) -> Subscription<Message> {
-        if self.agent.is_generating {
-            Subscription::run(
-                agent::agent::request_response_stream(
-                    self.user.content.text().to_owned(),
-                    self.out_path.content.to_owned()
-                )
-            )
-        } else {
-            Subscription::none()
-        }
-    }
+    // fn subscription(&self) -> Subscription<Message> {
+    //     if self.agent.is_generating {
+    //         Subscription::run(
+    //             agent::agent::request_response_stream(
+    //                 self.user.content.text().to_owned(),
+    //                 self.out_path.content.to_owned()
+    //             )
+    //         )
+    //     } else {
+    //         Subscription::none()
+    //     }
+    // }
 }
 
 pub fn main() -> iced::Result {
     iced::application("ahmad 0.1a.0", App::update, App::view)
-        .subscription(App::subscription)
-        .run_with(App::new())
+        .run_with( || (App::new(), Task::none()))
 }
