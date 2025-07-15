@@ -1,16 +1,16 @@
 use std::ffi::OsString;
+use std::error::Error;
 use std::path::{self, PathBuf};
 
 use futures::Stream;
 use iced::widget::{button, column, progress_bar, row, text_editor, text_input};
-use iced::{Element, Task};
-
-use crate::agent::agent;
+use iced::{Element, Task, Subscription};
 
 pub mod agent;
 
 struct Agent {
-    task: Task<Message>
+    task: Task<Message>,
+    is_generating: bool
 }
 
 #[derive(Default)]
@@ -43,6 +43,7 @@ enum Message {
     OutputPathChanged(String),
     PromptSubmitted,
     AgentProgressUpdated(f32),
+    ResponseComplete(String),
     Reset,
     AgentError,
 }
@@ -122,7 +123,8 @@ impl AgentProgressBar {
 impl Default for Agent {
     fn default() -> Self {
         Self {
-            task: Task::none()
+            task: Task::none(),
+            is_generating: false
         }
     }
 }
@@ -135,8 +137,32 @@ impl Agent {
         }
     }
 
-    pub fn request() {
-
+    pub fn request(&mut self, prompt: String, filepath: PathBuf) -> () {
+        self.task = Task::run(
+            agent::agent::request_response_stream(
+                prompt.clone(),
+                filepath.clone()
+            ),
+            move |res| match res {
+                Ok(s) => {
+                    // if let Ok(pct) = s.parse() {
+                    //     Message::AgentProgressUpdated(pct)
+                    // } else {
+                    //     let content = filepath
+                    //         .as_os_str()
+                    //         .to_str()
+                    //         .expect("Output filepath should be valid.");
+                    //     let fmtstr = format!("Generated MIDI successfully saved to: {}", content);
+                    //     Message::ResponseComplete(String::from(fmtstr.as_str()))
+                    // }
+                    let fmtstr = format!("Generated MIDI successfully saved to: {}", s);
+                    Message::ResponseComplete(fmtstr.to_owned())
+                }
+                Err(_) => {
+                    Message::AgentError
+                }
+            }
+        );
     }
 }
 
@@ -163,16 +189,19 @@ impl App {
             .into()
     }
 
-    fn update(state: &mut Self, message: Message) {
+    fn update(state: &mut Self, message: Message)  -> Task<Message> {
         match message {
             Message::UserEdit(s) => {
                 UserTextEditor::update(&mut state.user, Message::UserEdit(s));
+                Task::none()
             },
             Message::OutputPathChanged(s) => {
                 AgentTextInput::update(&mut state.out_path, Message::OutputPathChanged(s));
+                Task::none()
             },
             Message::AgentProgressUpdated(f) => {
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(f));
+                Task::none()
             },
             Message::PromptSubmitted => {
                 // check for errors
@@ -180,7 +209,7 @@ impl App {
                 let Some(filepath) = state.out_path.content.to_str() else {
                     state.errors.push_str("Error: no output filepath defined. Please define where
                                            you'd like the generated MIDI to go.\n");
-                    return;
+                    return Task::none()
                 };
 
                 if !state.out_path.content.is_dir() {
@@ -192,40 +221,36 @@ impl App {
                         .push_str(format!("Error: current filepath is not pointing at a valid location. Please
                                            ensure that the filepath points to an existing folder that doesn't
                                            contain a file named {} \n", filename).as_str());
-                    return;
+                    return Task::none();
                 }
 
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(50.0));
-                Task::run(
-                    agent::agent::request_response_stream(
-                        state.user.content.text().clone(),
-                        state.out_path.content.clone()
-                    ),
-                    |res| match res {
-                        Ok(s) => {
-                            if let Ok(pct) = s.parse() {
-                                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(pct))
-                            } else {
-                                let content = state.out_path.content
-                                    .as_os_str()
-                                    .to_str()
-                                    .expect("Output filepath should be valid.");
-                                let response = format!("Generated MIDI successfully saved to: {}", content).as_str();
-                                state.errors.push_str(response);
-                            }
-                        }
-                        Err(_) => {
-                            // update other state based on errors?
-                            return;
-                        }
-                    }
-                );
+                state.agent.request(
+                    state.user.content.text().to_owned(),
+                    state.out_path.content.to_owned());
+                Task::none()
+
             },
-            _ => {}
+            _ => { Task::none() }
+        }
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        if self.agent.is_generating {
+            Subscription::run(
+                agent::agent::request_response_stream(
+                    self.user.content.text().to_owned(),
+                    self.out_path.content.to_owned()
+                )
+            )
+        } else {
+            Subscription::none()
         }
     }
 }
 
 pub fn main() -> iced::Result {
-    iced::run(App::new, App::update, App::view)
+    iced::application("ahmad 0.1a.0", App::update, App::view)
+        .subscription(App::subscription)
+        .run_with(App::new())
 }
