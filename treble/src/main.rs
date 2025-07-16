@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use anyhow::Error;
-use iced::widget::{button, column, progress_bar, row, text_editor, text_input};
+use iced::widget::{button, column, progress_bar, row, text_editor, text_input, text};
 use iced::{Element, Task};
+use tracing::{info, error};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 mod agent;
 
@@ -126,7 +129,7 @@ impl AgentProgressBar {
 impl Agent {
     pub fn new() -> Task<Message> {
         Task::run(
-            agent::agent::initialize(),
+            agent::check_backend(),
             move |res | match res {
                 Ok(_) => {
                     Message::Reset
@@ -140,7 +143,7 @@ impl Agent {
 
     pub fn request(prompt: String, filepath: PathBuf) -> Task<Message> {
         Task::run(
-            agent::agent::request_response_stream(
+            agent::request_response_stream(
                 prompt.clone(),
                 filepath.clone()
             ),
@@ -166,12 +169,11 @@ impl Agent {
 
 impl App {
     fn new() -> Self {
-        Agent::new();
         Self {
             user: UserTextEditor::new(),
             out_path: AgentTextInput::new(),
             progress: AgentProgressBar::new(),
-            errors: String::from("No errors yet. Happy trails!"),
+            errors: String::from("No errors yet. Happy trails!\n"),
         }
     }
 
@@ -181,6 +183,7 @@ impl App {
             AgentTextInput::view(&state.out_path),
             button("Generate").on_press(Message::PromptSubmitted),
             AgentProgressBar::view(&state.progress),
+            text(&state.errors[..]).size(20)
         ]
             .spacing(20)
             .padding(20)
@@ -190,18 +193,23 @@ impl App {
     fn update(state: &mut Self, message: Message)  -> Task<Message> {
         match message {
             Message::UserEdit(s) => {
+                info!("user edited model prompt.");
                 UserTextEditor::update(&mut state.user, Message::UserEdit(s));
                 Task::none()
             },
             Message::OutputPathChanged(s) => {
+                info!("user changed output path: {}", s);
                 AgentTextInput::update(&mut state.out_path, Message::OutputPathChanged(s));
                 Task::none()
             },
             Message::AgentProgressUpdated(f) => {
+                info!("agent progress updated to {}", f);
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(f));
                 Task::none()
             },
             Message::PromptSubmitted => {
+                state.errors.clear();
+                info!("prompt submitted...");
                 // check for errors
                 // state.errors.clear();
                 // let Some(_) = state.out_path.content.to_str() else {
@@ -215,6 +223,7 @@ impl App {
                         Some(name) => name.to_str().unwrap_or(""),
                         None => "",
                     };
+                    info!("Pushing error string to state.errors...");
                     state.errors
                         .push_str(format!("Error: current filepath is not pointing at a valid location. Please
                                            ensure that the filepath points to an existing folder that doesn't
@@ -229,10 +238,12 @@ impl App {
                 )
             },
             Message::AgentError => {
+                state.errors.clear();
                 state.errors.push_str("Error: agent failed generation. Check dev logs for more detail.\n");
                 Task::none()
             },
             Message::ResponseComplete(user_msg) => {
+                state.errors.clear();
                 state.errors.push_str(&user_msg);
                 Task::none()
             },
@@ -242,7 +253,6 @@ impl App {
                 state.out_path.content = PathBuf::new();
                 Task::none()
             },
-            _ => { Task::none() }
         }
     }
 
@@ -261,6 +271,14 @@ impl App {
 }
 
 pub fn main() -> iced::Result {
+    let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(non_blocking)
+        .init();
+
+    info!("Starting UI...");
     iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Task::none()))
+        .run_with( || (App::new(), Agent::new()))
 }
