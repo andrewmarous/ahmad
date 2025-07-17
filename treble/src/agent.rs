@@ -5,6 +5,7 @@ use iced_futures::stream::try_channel;
 use iced_futures::core::image::Bytes;
 use futures::{stream::Stream, SinkExt};
 use reqwest::Client;
+use tracing::info;
 use url::Url;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::fs::File;
@@ -28,13 +29,17 @@ struct GenerationPayload<'a> {
 struct GenerationResponse {
 }
 
-fn api_url(endpoint: &str) -> Url {
+fn api_url(endpoint: &str) -> Result<Url, Error> {
     let mut url_base: String = env::var("API_URL").expect("API_URL must be defined");
     url_base.push_str(endpoint);
-    Url::parse(&url_base).expect("Given url is not valid.")
+    match Url::parse(&url_base) {
+        Err(e) => Err(Error::new(e)),
+        Ok(url) => Ok(url)
+    }
 }
 
 pub fn check_backend() -> impl Stream<Item= Result<(), Error>> {
+    info!("checking backend connection...");
     let port: u16 = 8000;
     let url: String = env::var("API_URL").expect("API_URL must be defined");
     let port_check = async move {
@@ -55,18 +60,21 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
                 negative_prompt: "Low quality, average quality".into(),
                 filename: "",
             };
+            info!("built request payload.");
             sender.send(String::from("66.0")).await?;
 
             let response = client
-                .post(api_url("generate"))
+                .post(api_url("generate")?)
                 .json(&payload)
                 .send()
                 .await?;
+            info!("received generate request.");
             sender.send(String::from("99.0")).await?;
 
             let mut file = File::create(&output_path).await?;
             let mut downloaded = 0usize;
 
+            info!("building file...");
             let mut bs = response.bytes_stream();
             while let Some(chunk) = bs.next().await {
                 let written = file.write(chunk
@@ -74,6 +82,7 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
                     .as_ref()).await?;
                 downloaded += written;
             }
+            info!("response file successfully built.");
             sender.send(String::from(downloaded.to_string())).await?;
 
             Ok(())

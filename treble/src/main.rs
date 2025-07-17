@@ -73,7 +73,9 @@ impl UserTextEditor {
 
     fn view(state: &Self) -> Element<'_, Message> {
         text_editor(&state.content)
-            .placeholder("Ask for a riff, melody, or bassline with a specific instrument.")
+            .placeholder(
+                "Ask for a riff, melody, or bassline with a specific instrument. Be sure to include descriptive adjectives and adjectives like 'high quality' or 'clear'."
+            )
             .on_action(Message::UserEdit)
             .into()
     }
@@ -165,6 +167,9 @@ impl AgentProgressBar {
 // }
 
 impl Agent {
+
+    pub fn reset() -> Task<Message> { Task::done(Message::Reset) }
+
     pub fn check_connection() -> Task<Message> {
         Task::run(
             agent::check_backend(),
@@ -175,9 +180,8 @@ impl Agent {
                     )
                 },
                 Err(e) => {
-                    Message::ConnectionResult(
-                        e.to_string()
-                    )
+                    error!("Error checking connection to backend: {e}");
+                    Message::ConnectionResult(e.to_string())
                 }
             }
         )
@@ -194,11 +198,10 @@ impl Agent {
                     if let Ok(pct) = s.parse() {
                         Message::AgentProgressUpdated(pct)
                     } else {
-                        let content = filepath
-                            .as_os_str()
-                            .to_str()
-                            .expect("Output filepath should be valid.");
-                        Message::ResponseComplete(content.to_string())
+                        let size: usize = s.parse().unwrap();
+                        Message::ResponseComplete(String::from(
+                            format!("Model response received, file is {} bytes", size)
+                        ))
                     }
                 }
                 Err(e) => {
@@ -271,7 +274,6 @@ impl App {
                     .join(state.out_path.filename.as_str());
 
                 if filepath.exists() {
-                    info!("Pushing error string to state.errors...");
                     state.errors
                         .push_str(format!("Error: current filepath is not pointing at a valid location. Please
                                            ensure that the filepath points to an existing folder that doesn't
@@ -286,6 +288,7 @@ impl App {
                 )
             },
             Message::AgentError(e) => {
+                error!("Error with agent: {e}");
                 state.errors.clear();
                 let fmtstr = format!("Error generating response: {}", e);
                 state.errors.push_str(&fmtstr);
@@ -340,5 +343,5 @@ pub fn main() -> iced::Result {
 
     info!("Starting UI...");
     iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Agent::check_connection()))
+        .run_with( || (App::new(), Agent::reset()))
 }
