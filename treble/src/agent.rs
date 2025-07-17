@@ -1,7 +1,7 @@
 use std::env;
 
 use iced_futures::stream::try_channel;
-use futures::stream::Stream;
+use futures::{stream::Stream, SinkExt};
 
 use anyhow::Error;
 
@@ -11,7 +11,7 @@ use std::{
 
 pub fn check_backend() -> impl Stream<Item= Result<(), Error>> {
     let port_check = async move {
-        let port: u16 = 443;
+        let port: u16 = 8000;
         let url: String = env::var("API_URL").expect("API_URL must be defined");
         let url: &str = &url[..];
 
@@ -25,21 +25,23 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
     try_channel(
         1, move |mut sender| async move {
             let mut stream = TcpStream::connect("127.0.0.1:8000")?;
-            sender.try_send(String::from("25.0"))?;
+            sender.send(String::from("25.0")).await?;
+
+            let request = "";
 
             stream
                 .write_all(prompt.as_bytes())
                 .and_then(|_| stream.write_all(b"\n"))?;
-            sender.try_send(String::from("50.0"))?;
+            sender.send(String::from("50.0")).await?;
 
             let mut buf = Vec::new();
             stream
                 .read_to_end(&mut buf)?;
             let response = String::from_utf8(buf)?;
-            sender.try_send(String::from("75.0"))?;
+            sender.send(String::from("75.0")).await?;
 
             fs::write(output_path, &response)?;
-            sender.try_send(response)?;
+            sender.send(response).await?;
 
             Ok(())
         }

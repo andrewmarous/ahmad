@@ -6,6 +6,7 @@ use iced::{Element, Task};
 use tracing::{info, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
+use dotenv::dotenv;
 
 mod agent;
 
@@ -41,10 +42,10 @@ enum Message {
     PromptSubmitted,
     AgentProgressUpdated(f32),
     ResponseComplete(String),
-    ConnectionOK,
-    ConnectionFailed,
+    CheckConnection,
+    ConnectionResult(String),
     Reset,
-    AgentError,
+    AgentError(String),
 }
 
 impl UserTextEditor {
@@ -129,15 +130,19 @@ impl AgentProgressBar {
 // }
 
 impl Agent {
-    pub fn new() -> Task<Message> {
+    pub fn check_connection() -> Task<Message> {
         Task::run(
             agent::check_backend(),
             move |res | match res {
                 Ok(_) => {
-                    Message::ConnectionOK
+                    Message::ConnectionResult(
+                        String::from("Connection to AI backend is successful!")
+                    )
                 },
-                Err(_) => {
-                    Message::ConnectionFailed
+                Err(e) => {
+                    Message::ConnectionResult(
+                        e.to_string()
+                    )
                 }
             }
         )
@@ -161,8 +166,8 @@ impl Agent {
                         Message::ResponseComplete(content.to_string())
                     }
                 }
-                Err(_) => {
-                    Message::AgentError
+                Err(e) => {
+                    Message::AgentError(e.to_string())
                 }
             }
         )
@@ -183,6 +188,7 @@ impl App {
         column![
             UserTextEditor::view(&state.user),
             AgentTextInput::view(&state.out_path),
+            button("Check Connection").on_press(Message::CheckConnection),
             button("Generate").on_press(Message::PromptSubmitted),
             AgentProgressBar::view(&state.progress),
             text(&state.errors[..]).size(20)
@@ -220,7 +226,7 @@ impl App {
                 //     return Task::none()
                 // };
 
-                if !state.out_path.content.is_dir() {
+                if state.out_path.content.exists() {
                     let filename = match state.out_path.content.file_name() {
                         Some(name) => name.to_str().unwrap_or(""),
                         None => "",
@@ -233,15 +239,16 @@ impl App {
                     return Task::none();
                 }
 
-                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(50.0));
+                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(0.0));
                 Agent::request(
                     state.user.content.text().to_owned(),
                     state.out_path.content.to_owned(),
                 )
             },
-            Message::AgentError => {
+            Message::AgentError(e) => {
                 state.errors.clear();
-                state.errors.push_str("Error: agent failed generation. Check dev logs for more detail.\n");
+                let fmtstr = format!("Error generating response: {}", e);
+                state.errors.push_str(&fmtstr);
                 Task::none()
             },
             Message::ResponseComplete(user_msg) => {
@@ -255,14 +262,13 @@ impl App {
                 state.out_path.content = PathBuf::new();
                 Task::none()
             },
-            Message::ConnectionOK => {
+            Message::CheckConnection => {
                 state.errors.clear();
-                state.errors.push_str("Connected to AI backend!");
-                Task::none()
-            },
-            Message::ConnectionFailed => {
+                Agent::check_connection()
+            }
+            Message::ConnectionResult(s) => {
                 state.errors.clear();
-                state.errors.push_str("Error: couldn't connect to AI backend.");
+                state.errors.push_str(&s[..]);
                 Task::none()
             }
         }
@@ -283,6 +289,7 @@ impl App {
 }
 
 pub fn main() -> iced::Result {
+    dotenv().ok();
     let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
@@ -292,5 +299,5 @@ pub fn main() -> iced::Result {
 
     info!("Starting UI...");
     iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Agent::new()))
+        .run_with( || (App::new(), Agent::check_connection()))
 }
