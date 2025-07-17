@@ -1,12 +1,14 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Error;
-use iced::widget::{button, column, progress_bar, row, text_editor, text_input, text};
-use iced::{Element, Task};
 use tracing::{info, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use dotenv::dotenv;
+use rfd::FileDialog;
+
+use iced::{Element, Length, Task};
+use iced::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
 
 mod agent;
 
@@ -18,8 +20,10 @@ struct UserTextEditor {
 }
 
 #[derive(Default)]
-struct AgentTextInput {
-    content: PathBuf
+struct AgentOutputContainer {
+    filepath: String,
+    separator_text: String,
+    filename: String,
 }
 
 #[derive(Default)]
@@ -30,15 +34,18 @@ struct AgentProgressBar {
 #[derive(Default)]
 struct App {
     user: UserTextEditor,
-    out_path: AgentTextInput,
+    out_path: AgentOutputContainer,
     progress: AgentProgressBar,
     errors: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 enum Message {
+    #[default]
+    Empty,
     UserEdit(text_editor::Action),
-    OutputPathChanged(String),
+    OutputPathFDSelected,
+    OutputNameChanged(String),
     PromptSubmitted,
     AgentProgressUpdated(f32),
     ResponseComplete(String),
@@ -72,24 +79,52 @@ impl UserTextEditor {
     }
 }
 
-impl AgentTextInput {
+impl AgentOutputContainer {
     fn new() -> Self {
         Self {
-            content: PathBuf::new()
+            filepath: String::from("Select a folder..."),
+            separator_text: String::from("/"),
+            filename: String::new(),
         }
     }
 
     fn view(state: &Self) -> Element<'_, Message> {
-        text_input("path/to/your/output.midi", state.content.to_str().unwrap_or(""))
-            .on_input(Message::OutputPathChanged)
+        container(
+            column![
+                text("Output path:").size(10),
+                row![
+                    button(&state.filepath[..])
+                        .on_press(Message::OutputPathFDSelected)
+                        .width(Length::FillPortion(3)),
+                    text(&state.separator_text).size(20),
+                    text_input("example.midi or example.wav", &state.filename[..])
+                        .on_input(Message::OutputNameChanged)
+                        .width(Length::FillPortion(1))
+                ]
+                    .spacing(10)
+                    .padding(20)
+            ]
+                .padding(10)
+        )
+            .align_left(Length::Shrink)
+            .style(container::rounded_box)
             .into()
     }
 
     fn update(state: &mut Self, message: Message) {
         match message {
-            Message::OutputPathChanged(new) => {
-                state.content = PathBuf::from(new);
-            }
+            Message::OutputPathFDSelected => {
+                // init RFD session, pull value from that and assign to state.filepath
+                let filepath = FileDialog::new()
+                    .set_directory(
+                        std::env::current_dir().unwrap().as_path())
+                    .pick_folder()
+                    .expect("Error: rfd's pick_folder failed??");
+                state.filepath = String::from(filepath.to_str().unwrap())
+            },
+            Message::OutputNameChanged(s) => {
+                state.filename = String::from(s);
+            },
             _ => {}
         }
     }
@@ -178,7 +213,7 @@ impl App {
     fn new() -> Self {
         Self {
             user: UserTextEditor::new(),
-            out_path: AgentTextInput::new(),
+            out_path: AgentOutputContainer::new(),
             progress: AgentProgressBar::new(),
             errors: String::from("No errors yet. Happy trails!\n"),
         }
@@ -187,7 +222,7 @@ impl App {
     fn view(state: &Self) -> Element<'_, Message> {
         column![
             UserTextEditor::view(&state.user),
-            AgentTextInput::view(&state.out_path),
+            AgentOutputContainer::view(&state.out_path),
             button("Check Connection").on_press(Message::CheckConnection),
             button("Generate").on_press(Message::PromptSubmitted),
             AgentProgressBar::view(&state.progress),
@@ -205,11 +240,16 @@ impl App {
                 UserTextEditor::update(&mut state.user, Message::UserEdit(s));
                 Task::none()
             },
-            Message::OutputPathChanged(s) => {
-                info!("user changed output path: {}", s);
-                AgentTextInput::update(&mut state.out_path, Message::OutputPathChanged(s));
+            Message::OutputNameChanged(s) => {
+                info!("user changed output filename: {}", s);
+                AgentOutputContainer::update(&mut state.out_path, Message::OutputNameChanged(s));
                 Task::none()
             },
+            Message::OutputPathFDSelected => {
+                info!("opening folder select dialog...");
+                AgentOutputContainer::update(&mut state.out_path, Message::OutputPathFDSelected);
+                Task::none()
+            }
             Message::AgentProgressUpdated(f) => {
                 info!("agent progress updated to {}", f);
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(f));
@@ -226,23 +266,23 @@ impl App {
                 //     return Task::none()
                 // };
 
-                if state.out_path.content.exists() {
-                    let filename = match state.out_path.content.file_name() {
-                        Some(name) => name.to_str().unwrap_or(""),
-                        None => "",
-                    };
+                // construct output filepath
+                let filepath: PathBuf = Path::new(state.out_path.filepath.as_str())
+                    .join(state.out_path.filename.as_str());
+
+                if filepath.exists() {
                     info!("Pushing error string to state.errors...");
                     state.errors
                         .push_str(format!("Error: current filepath is not pointing at a valid location. Please
                                            ensure that the filepath points to an existing folder that doesn't
-                                           contain a file named {} \n", filename).as_str());
+                                           contain a file named {} \n", state.out_path.filename).as_str());
                     return Task::none();
                 }
 
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(0.0));
                 Agent::request(
                     state.user.content.text().to_owned(),
-                    state.out_path.content.to_owned(),
+                    filepath
                 )
             },
             Message::AgentError(e) => {
@@ -258,19 +298,20 @@ impl App {
             },
             Message::Reset => {
                 state.errors.clear();
-                state.user.content = text_editor::Content::new();
-                state.out_path.content = PathBuf::new();
+                state.user = UserTextEditor::new();
+                state.out_path = AgentOutputContainer::new();
                 Task::none()
             },
             Message::CheckConnection => {
                 state.errors.clear();
                 Agent::check_connection()
-            }
+            },
             Message::ConnectionResult(s) => {
                 state.errors.clear();
                 state.errors.push_str(&s[..]);
                 Task::none()
-            }
+            },
+            Message::Empty => { Task::none() }
         }
     }
 
