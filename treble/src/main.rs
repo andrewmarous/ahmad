@@ -41,6 +41,8 @@ enum Message {
     PromptSubmitted,
     AgentProgressUpdated(f32),
     ResponseComplete(String),
+    ConnectionOK,
+    ConnectionFailed,
     Reset,
     AgentError,
 }
@@ -132,10 +134,10 @@ impl Agent {
             agent::check_backend(),
             move |res | match res {
                 Ok(_) => {
-                    Message::Reset
+                    Message::ConnectionOK
                 },
                 Err(_) => {
-                    Message::AgentError
+                    Message::ConnectionFailed
                 }
             }
         )
@@ -253,6 +255,16 @@ impl App {
                 state.out_path.content = PathBuf::new();
                 Task::none()
             },
+            Message::ConnectionOK => {
+                state.errors.clear();
+                state.errors.push_str("Connected to AI backend!");
+                Task::none()
+            },
+            Message::ConnectionFailed => {
+                state.errors.clear();
+                state.errors.push_str("Error: couldn't connect to AI backend.");
+                Task::none()
+            }
         }
     }
 
