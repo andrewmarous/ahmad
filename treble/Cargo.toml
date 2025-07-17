@@ -18,3 +18,6 @@ reqwest = { version = "0.12.22", default-features = true, features = ["json", "s
 url = "2.5.4"
 serde = { version = "1.0.219", default-features = true, features = ["derive"] }
 rfd = "0.15.4"
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master" }
+nih_plug_iced = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master", package = "nih_plug_iced" }
+

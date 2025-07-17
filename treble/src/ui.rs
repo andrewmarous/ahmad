@@ -332,16 +332,16 @@ impl App {
     // }
 }
 
-pub fn main() -> iced::Result {
-    dotenv().ok();
-    let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(non_blocking)
-        .init();
+// pub fn main() -> iced::Result {
+//     dotenv().ok();
+//     let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
+//     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+//     tracing_subscriber::fmt()
+//         .with_max_level(tracing::Level::INFO)
+//         .with_writer(non_blocking)
+//         .init();
 
-    info!("Starting UI...");
-    iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Agent::reset()))
-}
+//     info!("Starting UI...");
+//     iced::application("ahmad 0.1a.0", App::update, App::view)
+//         .run_with( || (App::new(), Agent::reset()))
+// }
