@@ -2,10 +2,9 @@ use std::env;
 
 use futures::StreamExt;
 use iced_futures::stream::try_channel;
-use iced_futures::core::image::Bytes;
 use futures::{stream::Stream, SinkExt};
+use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONNECTION};
-use reqwest::Client;
 use tracing::info;
 use url::Url;
 use tokio::io::{self, AsyncWriteExt};
@@ -75,27 +74,24 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
                 .post(api_url("generate")?)
                 .headers(headers)
                 .json(&payload)
-                .send()
-                .await?;
+                .send()?;
+
             info!("received generate request.");
             sender.send(String::from("99.0")).await?;
 
-            let mut file = File::create(&output_path).await?;
-            let mut downloaded = 0usize;
-
             info!("building file...");
-            let mut bs = response.bytes_stream();
-            while let Some(chunk) = bs.next().await {
-                let written = file.write(chunk
-                    .unwrap_or(Bytes::new())
-                    .as_ref()).await?;
-                downloaded += written;
-            }
+            let bytes = response.bytes()?;
+            let len = bytes.len();
+
+            fs::write(output_path, bytes)?;
             info!("response file successfully built.");
-            sender.send(String::from(downloaded.to_string())).await?;
+            sender.send(String::from(
+                format!("{}", len)
+            )).await?;
 
             Ok(())
         }
     )
 }
+
 
