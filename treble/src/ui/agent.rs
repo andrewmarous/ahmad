@@ -4,6 +4,7 @@ use futures::StreamExt;
 use iced_futures::stream::try_channel;
 use iced_futures::core::image::Bytes;
 use futures::{stream::Stream, SinkExt};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONNECTION};
 use reqwest::Client;
 use tracing::info;
 use url::Url;
@@ -55,6 +56,13 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
             sender.send(String::from("33.0")).await?;
 
             let client = Client::new();
+            let headers = {
+                let mut res = HeaderMap::new();
+                let k = "keep-alive";
+                res.append(CONNECTION, HeaderValue::from_static(k));
+                res.append(HeaderName::from_static(k), HeaderValue::from_static("timeout=300, max=50"));
+                res
+            };
             let payload = GenerationPayload {
                 prompt: &prompt[..],
                 negative_prompt: "Low quality, average quality".into(),
@@ -65,6 +73,7 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
 
             let response = client
                 .post(api_url("generate")?)
+                .headers(headers)
                 .json(&payload)
                 .send()
                 .await?;
