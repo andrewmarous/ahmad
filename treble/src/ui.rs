@@ -1,14 +1,23 @@
+// TODO: port this entire fucking thing to vizia
+
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Error;
+use nih_plug::prelude::GuiContext;
 use tracing::{info, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use dotenv::dotenv;
 use rfd::FileDialog;
 
-use iced::{Element, Length, Task};
+use iced::{Element, Length, Task, executor};
 use iced::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
+use nih_plug_iced::widgets as nih_widgets;
+use nih_plug_iced::IcedEditor;
+
+use crate::AhmadParams;
 
 mod agent;
 
@@ -31,8 +40,12 @@ struct AgentProgressBar {
     progress: f32
 }
 
-#[derive(Default)]
-struct App {
+struct AhmadEditor {
+    // plugin state
+    params: Arc<AhmadParams>,
+    context: Arc<dyn GuiContext>,
+
+    // ui state
     user: UserTextEditor,
     out_path: AgentOutputContainer,
     progress: AgentProgressBar,
@@ -41,6 +54,10 @@ struct App {
 
 #[derive(Debug, Clone, Default)]
 enum Message {
+    // plugin messages
+    ParamUpdate(nih_widgets::ParamMessage),
+
+    // ui messages
     #[default]
     Empty,
     UserEdit(text_editor::Action),
@@ -212,110 +229,118 @@ impl Agent {
     }
 }
 
-impl App {
-    fn new() -> Self {
-        Self {
+impl IcedEditor for AhmadEditor {
+    type Executor = executor::Default;
+    type Message = Message;
+    type InitializationFlags = Arc<AhmadParams>;
+
+    fn new(
+        params: Arc<AhmadParams>, context: Arc<dyn GuiContext>
+    ) -> (Self, Task<Self::Message>) {
+        let editor = Self {
+            params,
+            context,
+
             user: UserTextEditor::new(),
             out_path: AgentOutputContainer::new(),
             progress: AgentProgressBar::new(),
             errors: String::from("No errors yet. Happy trails!\n"),
-        }
+        };
+        (editor, Task::none())
     }
 
-    fn view(state: &Self) -> Element<'_, Message> {
+    fn context(&self) -> &dyn GuiContext {
+        self.context.as_ref()
+    }
+
+    fn view(&mut self) -> Element<'_, Self::Message> {
         column![
-            UserTextEditor::view(&state.user),
-            AgentOutputContainer::view(&state.out_path),
+            UserTextEditor::view(*self.user),
+            AgentOutputContainer::view(&self.out_path),
             button("Check Connection").on_press(Message::CheckConnection),
             button("Generate").on_press(Message::PromptSubmitted),
-            AgentProgressBar::view(&state.progress),
-            text(&state.errors[..]).size(20)
+            AgentProgressBar::view(&self.progress),
+            text(self.errors[..]).size(20)
         ]
             .spacing(20)
             .padding(20)
             .into()
     }
 
-    fn update(state: &mut Self, message: Message)  -> Task<Message> {
+    fn update(&mut self, _window: &mut WindowQueue, message: Message)  -> Task<Message> {
         match message {
             Message::UserEdit(s) => {
                 info!("user edited model prompt.");
-                UserTextEditor::update(&mut state.user, Message::UserEdit(s));
-                Task::none()
+                UserTextEditor::update(&mut self.user, Message::UserEdit(s));
             },
             Message::OutputNameChanged(s) => {
                 info!("user changed output filename: {}", s);
-                AgentOutputContainer::update(&mut state.out_path, Message::OutputNameChanged(s));
-                Task::none()
+                AgentOutputContainer::update(&mut self.out_path, Message::OutputNameChanged(s));
             },
             Message::OutputPathFDSelected => {
                 info!("opening folder select dialog...");
-                AgentOutputContainer::update(&mut state.out_path, Message::OutputPathFDSelected);
-                Task::none()
+                AgentOutputContainer::update(&mut self.out_path, Message::OutputPathFDSelected);
             }
             Message::AgentProgressUpdated(f) => {
                 info!("agent progress updated to {}", f);
-                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(f));
-                Task::none()
+                AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(f));
             },
             Message::PromptSubmitted => {
-                state.errors.clear();
+                self.errors.clear();
                 info!("prompt submitted...");
                 // check for errors
-                // state.errors.clear();
-                // let Some(_) = state.out_path.content.to_str() else {
-                //     state.errors.push_str("Error: no output filepath defined. Please define where
+                // self.errors.clear();
+                // let Some(_) = self.out_path.content.to_str() else {
+                //     self.errors.push_str("Error: no output filepath defined. Please define where
                 //                            you'd like the generated MIDI to go.\n");
                 //     return Task::none()
                 // };
 
                 // construct output filepath
-                let filepath: PathBuf = Path::new(state.out_path.filepath.as_str())
-                    .join(state.out_path.filename.as_str());
+                let filepath: PathBuf = Path::new(self.out_path.filepath.as_str())
+                    .join(self.out_path.filename.as_str());
 
                 if filepath.exists() {
-                    state.errors
+                    self.errors
                         .push_str(format!("Error: current filepath is not pointing at a valid location. Please
                                            ensure that the filepath points to an existing folder that doesn't
-                                           contain a file named {} \n", state.out_path.filename).as_str());
+                                           contain a file named {} \n", self.out_path.filename).as_str());
                     return Task::none();
                 }
 
-                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(0.0));
-                Agent::request(
-                    state.user.content.text().to_owned(),
+                AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(0.0));
+                return Agent::request(
+                    self.user.content.text().to_owned(),
                     filepath
                 )
             },
             Message::AgentError(e) => {
                 error!("Error with agent: {e}");
-                state.errors.clear();
+                self.errors.clear();
                 let fmtstr = format!("Error generating response: {}", e);
-                state.errors.push_str(&fmtstr);
-                Task::none()
+                self.errors.push_str(&fmtstr);
             },
             Message::ResponseComplete(user_msg) => {
-                state.errors.clear();
-                state.errors.push_str(&user_msg);
-                Task::none()
+                self.errors.clear();
+                self.errors.push_str(&user_msg);
             },
             Message::Reset => {
-                state.errors.clear();
-                state.user = UserTextEditor::new();
-                state.out_path = AgentOutputContainer::new();
-                Task::none()
+                self.errors.clear();
+                self.user = UserTextEditor::new();
+                self.out_path = AgentOutputContainer::new();
             },
             Message::CheckConnection => {
-                state.errors.clear();
+                self.errors.clear();
                 Agent::check_connection()
             },
             Message::ConnectionResult(s) => {
-                state.errors.clear();
-                state.errors.push_str(&s[..]);
-                Task::none()
+                self.errors.clear();
+                self.errors.push_str(&s[..]);
             },
-            Message::Empty => { Task::none() }
+            Message::ParamUpdate(message) => self.handle_param_message(message),
+            Message::Empty => {}
         }
+        Task::none()
     }
 
     // fn subscription(&self) -> Subscription<Message> {
@@ -345,3 +370,15 @@ impl App {
 //     iced::application("ahmad 0.1a.0", App::update, App::view)
 //         .run_with( || (App::new(), Agent::reset()))
 // }
+//
+
+pub(crate) fn default_state() -> Arc<IcedState> {
+    IcedState::from_size(400, 200)
+}
+
+pub(crate) fn create(
+    params: Arc<AhmadParams>,
+    editor_state: Arc<IcedState>,
+) -> Option<Box<dyn Editor>> {
+    create_iced_editor::<AhmadEditor>(editor_state, params)
+}
