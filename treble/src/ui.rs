@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Error;
+use futures::StreamExt;
 use tracing::{info, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
@@ -17,6 +18,8 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use vizia::prelude::*;
 
 use crate::AhmadParams;
+
+mod agent;
 
 #[derive(Lens)]
 struct UserEntryData {
@@ -60,6 +63,7 @@ pub enum UIEvent<'a> {
     ConnectionResult(Result<(), Error>),
     Reset,
     AgentError(Error),
+    AgentInfo(String),
 }
 
 impl Model for UIData {
@@ -94,14 +98,14 @@ impl Model for UIData {
 
                 self.output.progress = 0.0;
 
-                let resp = Agent::generate(self.user.content, filepath);
+                let resp = Agent::generate(cx, &self.user.content, filepath);
             },
             UIEvent::AgentProgressUpdated(f) => {
                 self.output.progress = f.to_owned();
             },
             UIEvent::CheckConnection => {
                 info!("Checking connection to backend...");
-                match Agent::check_connection() {
+                match Agent::check_connection(cx) {
                     Ok(_) => info!("Connection successful!"),
                     Err(e) => {
                         error!("Connection unsuccessful: {e}");
@@ -111,6 +115,11 @@ impl Model for UIData {
             },
             UIEvent::AgentError(e) => {
                 error!("Agent error: {e}");
+                self.errors = e.to_string();
+            }
+            UIEvent::AgentInfo(s) => {
+                info!("Agent info: {s}");
+                self.errors = e;
             }
             UIEvent::Reset => {
             }
@@ -121,11 +130,21 @@ impl Model for UIData {
 
 struct Agent;
 impl Agent {
-    fn check_connection() -> Result<(), Error> {
+    fn check_connection(cx: &mut EventContext) -> Result<(), Error> {
+        cx.spawn(|mut cx| {
+            match agent::check_backend() {
+                Ok(()) => cx.emit(UIEvent::AgentInfo(
+                    String::from("Connected to back-end successfully!"))),
+                Err(e) => cx.emit(UIEvent::AgentError(e)),
+            }
+        });
         Ok(())
     }
 
-    fn generate(prompt: &String, filepath: Path) {
-
+    fn generate(cx: &mut EventContext, prompt: &String, filepath: Path
+    ) -> Result<(), Error> {
+        cx.spawn(|mut cx| {
+        });
+        Ok(())
     }
 }
