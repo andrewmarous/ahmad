@@ -1,8 +1,10 @@
 use std::env;
 
-use futures::StreamExt;
-use iced_futures::stream::try_channel;
-use futures::{stream::Stream, SinkExt};
+use futures::{
+    StreamExt, SinkExt, stream::Stream,
+    executor::{block_on, block_on_stream},
+    channel::mpsc,
+};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONNECTION};
 use tracing::info;
@@ -38,60 +40,54 @@ fn api_url(endpoint: &str) -> Result<Url, Error> {
     }
 }
 
-pub fn check_backend() -> impl Stream<Item= Result<(), Error>> {
+pub fn check_backend() -> Result<(), Error> {
     info!("checking backend connection...");
     let port: u16 = 8000;
     let url: String = env::var("API_URL").expect("API_URL must be defined");
-    let port_check = async move {
-        TcpStream::connect((url, port))?;
-        Ok(())
-    };
-    futures::stream::once(port_check)
+    TcpStream::connect((url, port))?;
+    Ok(())
 }
 
-pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Stream<Item= Result<String, Error>> {
-    try_channel(
-        1, move |mut sender| async move {
-            sender.send(String::from("33.0")).await?;
+pub fn request_response_iterator(prompt: String) -> impl Iterator<Item= Result<String, Error>> {
+    let (mut tx, rx) = mpsc::channel(2);
+    std::thread::spawn(move || -> Result<(), Error> {
+        tx.try_send(Ok(String::from("33.0")))?;
 
-            let client = Client::new();
-            let headers = {
-                let mut res = HeaderMap::new();
-                let k = "keep-alive";
-                res.append(CONNECTION, HeaderValue::from_static(k));
-                res.append(HeaderName::from_static(k), HeaderValue::from_static("timeout=300, max=50"));
-                res
-            };
-            let payload = GenerationPayload {
-                prompt: &prompt[..],
-                negative_prompt: "Low quality, average quality".into(),
-                filename: "",
-            };
-            info!("built request payload.");
-            sender.send(String::from("66.0")).await?;
+        let client = Client::new();
+        let headers = {
+            let mut res = HeaderMap::new();
+            let k = "keep-alive";
+            res.append(CONNECTION, HeaderValue::from_static(k));
+            res.append(HeaderName::from_static(k), HeaderValue::from_static("timeout=300, max=50"));
+            res
+        };
+        let payload = GenerationPayload {
+            prompt: &prompt[..],
+            negative_prompt: "Low quality, average quality".into(),
+            filename: "",
+        };
+        info!("built request payload.");
+        tx.try_send(Ok("66.0".into()))?;
 
-            let response = client
-                .post(api_url("generate")?)
-                .headers(headers)
-                .json(&payload)
-                .send()?;
+        let response = client
+            .post(api_url("generate")?)
+            .headers(headers)
+            .json(&payload)
+            .send()?;
 
-            info!("received generate request.");
-            sender.send(String::from("99.0")).await?;
+        info!("received generate request.");
+        tx.try_send(Ok("99.0".into()))?;
 
-            info!("building file...");
-            let bytes = response.bytes()?;
-            let len = bytes.len();
+        // TODO: how to pass bytes to plugin?
 
-            fs::write(output_path, bytes)?;
-            info!("response file successfully built.");
-            sender.send(String::from(
-                format!("{}", len)
-            )).await?;
+        // FIX: response bytes should go to plugin, not via request/ui
+        let bytes = String::new();
+        tx.try_send(Ok(bytes))?;
 
-            Ok(())
-        }
-    )
+        Ok(())
+    });
+
+    block_on_stream(rx)
 }
 
 

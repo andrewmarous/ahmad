@@ -51,19 +51,38 @@ struct UIData {
     errors: String,
 }
 
-pub enum UIEvent<'a> {
+pub enum UIEvent {
     Empty,
     UserEntryEdit(String),
     OutputPathFDSelected,
     OutputNameChanged(String),
     PromptSubmitted,
     AgentProgressUpdated(f32),
-    ResponseComplete(&'a String), // TODO: make this bytes and stream straight into DAW
+    ResponseComplete(String), // TODO: make this bytes and stream straight into DAW
     CheckConnection,
     ConnectionResult(Result<(), Error>),
     Reset,
     AgentError(Error),
     AgentInfo(String),
+}
+
+impl Default for UserEntryData {
+    fn default() -> Self {
+        Self {
+            content: String::new()
+        }
+    }
+}
+
+impl Default for AgentOutputData {
+    fn default() -> Self {
+        Self {
+            filepath: String::new(),
+            separator_text: '/',
+            filename: String::new(),
+            progress: 0.0,
+        }
+    }
 }
 
 impl Model for UIData {
@@ -98,20 +117,14 @@ impl Model for UIData {
 
                 self.output.progress = 0.0;
 
-                let resp = Agent::generate(cx, &self.user.content, filepath);
+                Agent::generate(cx, &self.user.content);
             },
             UIEvent::AgentProgressUpdated(f) => {
                 self.output.progress = f.to_owned();
             },
             UIEvent::CheckConnection => {
                 info!("Checking connection to backend...");
-                match Agent::check_connection(cx) {
-                    Ok(_) => info!("Connection successful!"),
-                    Err(e) => {
-                        error!("Connection unsuccessful: {e}");
-                        self.errors = e.to_string();
-                    }
-                };
+                Agent::check_connection(cx);
             },
             UIEvent::AgentError(e) => {
                 error!("Agent error: {e}");
@@ -119,7 +132,7 @@ impl Model for UIData {
             }
             UIEvent::AgentInfo(s) => {
                 info!("Agent info: {s}");
-                self.errors = e;
+                self.errors = s.to_owned();
             }
             UIEvent::Reset => {
             }
@@ -130,21 +143,60 @@ impl Model for UIData {
 
 struct Agent;
 impl Agent {
-    fn check_connection(cx: &mut EventContext) -> Result<(), Error> {
-        cx.spawn(|mut cx| {
+    fn check_connection(cx: &mut EventContext) -> () {
+        cx.spawn(|cx| {
             match agent::check_backend() {
                 Ok(()) => cx.emit(UIEvent::AgentInfo(
                     String::from("Connected to back-end successfully!"))),
                 Err(e) => cx.emit(UIEvent::AgentError(e)),
-            }
+            };
         });
-        Ok(())
     }
 
-    fn generate(cx: &mut EventContext, prompt: &String, filepath: Path
-    ) -> Result<(), Error> {
-        cx.spawn(|mut cx| {
+    fn generate(cx: &mut EventContext, prompt: &String) -> () {
+        let p = prompt.clone();
+        cx.spawn(|cx| {
+            let mut iter = agent::request_response_iterator(p);
+            while let Some(se) = iter.next() {
+                let se = match se {
+                    Ok(a) => a,
+                    Err(e) => {
+                        cx.emit(UIEvent::AgentError(e));
+                        return ();
+                    }
+                };
+
+                if let Ok(progress) = se.parse::<f32>() {
+                    cx.emit(UIEvent::AgentProgressUpdated(progress));
+                } else { // bytes have been sent TODO: stream into daw
+                    cx.emit(UIEvent::ResponseComplete(String::new()));
+                }
+            }
         });
-        Ok(())
     }
+}
+
+pub(crate) fn default_state() -> Arc<ViziaState> {
+    ViziaState::new(|| (400, 200))
+}
+
+pub(crate) fn create(
+    params: Arc<AhmadParams>,
+    editor_state: Arc<ViziaState>,
+) -> Option<Box<dyn Editor>> {
+    create_vizia_editor(editor_state, ViziaTheming::Custom, move |cx, _| {
+        assets::register_noto_sans_light(cx);
+        assets::register_noto_sans_thin(cx);
+
+        UIData {
+            params,
+            user: UserEntryData::default(),
+            output: AgentOutputData::default(),
+            errors: String::new(),
+        }
+        .build(cx);
+
+        // View logic
+
+    })
 }
