@@ -1,11 +1,7 @@
-use std::io::Bytes;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Error;
-use futures::StreamExt;
 use tracing::{info, error};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
@@ -198,5 +194,43 @@ pub(crate) fn create(
 
         // View logic
 
+        VStack::new(cx, |cx| {
+            Label::new(cx, "Prompt:")
+                .font_family(vec![FamilyOwned::Named(String::from(assets::NOTO_SANS))])
+                .font_size(15.0)
+                .height(Pixels(50.0))
+                .bottom(Pixels(10.0));
+
+            Textbox::new_multiline(
+                cx,
+                UserEntryData::content,
+                true)
+                .placeholder(
+                    "Ask for a riff, melody, or bassline with a specific instrument. Be sure to include descriptive adjectives and adjectives like 'high quality' or 'clear'."
+                )
+                .top(Pixels(10.0))
+                .bottom(Pixels(10.0));
+
+            // check connection
+            HStack::new(cx, |cx| {
+                Button::new(cx, |cx| Label::new(cx, "Check Connection"))
+                    .variant(ButtonVariant::Outline)
+                    .on_press(|cx| cx.emit(UIEvent::CheckConnection))
+                    .left(Pixels(10.0))
+                    .right(Pixels(5.0));
+                Button::new(cx, |cx| Label::new(cx, "Generate"))
+                    .variant(ButtonVariant::Accent)
+                    .on_press(|cx| cx.emit(UIEvent::PromptSubmitted))
+                    .left(Pixels(5.0))
+                    .right(Pixels(10.0));
+            })
+                .top(Pixels(10.0))
+                .bottom(Pixels(10.0));
+
+            ProgressBar::horizontal(cx, AgentOutputData::progress)
+                .width(Pixels(160.0));
+
+            Label::new(cx, UIData::errors);
+        });
     })
 }

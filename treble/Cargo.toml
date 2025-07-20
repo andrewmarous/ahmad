@@ -5,8 +5,6 @@ edition = "2024"
 
 [dependencies]
 futures = "0.3.31"
-iced = "0.13.1"
-iced_futures = "0.13.2"
 magic = "0.16.2"
 anyhow = "1.0.98"
 tracing = "0.1.41"
@@ -20,5 +18,4 @@ serde = { version = "1.0.219", default-features = true, features = ["derive"] }
 rfd = "0.15.4"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master" }
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master", package = "nih_plug_vizia" }
-nih_plug_iced = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master", package = "nih_plug_iced" }
 vizia = "0.3.0"
