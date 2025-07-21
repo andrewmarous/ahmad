@@ -19,13 +19,10 @@ url = "2.5.4"
 serde = { version = "1.0.219", default-features = true, features = ["derive"] }
 rfd = "0.15.4"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master" }
-baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "9a0b42c09d712777b2edb4c5e0cb6baf21e988f0", features = ["opengl"]}
 wgpu = "25"
-raw-window-handle = "0.5"
-raw-window-handle-06 = { package = "raw-window-handle", version = "0.6.2" }
 pollster = "0.4.0"
-iced_wgpu = "0.13.5"
-iced_runtime = "0.13.2"
 crossbeam = "0.8.4"
+iced_baseview = { git = "https://github.com/BillyDM/iced_baseview.git", default-features = false, features = ["wgpu"] }
+raw-window-handle = "0.6.2"
 
 

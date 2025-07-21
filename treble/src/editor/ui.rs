@@ -7,8 +7,8 @@ use tracing_subscriber::fmt::writer::MakeWriterExt;
 use dotenv::dotenv;
 use rfd::FileDialog;
 
-use iced::{Element, Length, Task};
-use iced::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
+use iced_baseview::{Element, Length, Task, Application};
+use iced_baseview::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
 
 struct Agent;
 
@@ -210,17 +210,22 @@ impl Agent {
     }
 }
 
-impl UIState {
-    fn new() -> Self {
-        Self {
+impl Application for UIState {
+    type Message = Message;
+    type Theme = iced_baseview::Theme;
+    type Executor = iced_baseview::executor::Default;
+    type Flags = ();
+
+    fn new(_flags: Self::Flags) -> (Self, Task<Self::Message>) {
+        (Self {
             user: UserTextEditor::new(),
             out_path: AgentOutputContainer::new(),
             progress: AgentProgressBar::new(),
             errors: String::from("No errors yet. Happy trails!\n"),
-        }
+        }, Task::none() )
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    fn view(&self) -> Element<'_, Message> {
         column![
             UserTextEditor::view(&self.user),
             AgentOutputContainer::view(&self.out_path),
@@ -313,6 +318,17 @@ impl UIState {
                 Task::none()
             },
             Message::Empty => { Task::none() }
+        }
+    }
+
+    fn theme(&self) -> Self::Theme {
+        iced_baseview::Theme::KanagawaLotus
+    }
+
+    fn style(&self, theme: &Self::Theme) -> iced_baseview::Appearance {
+        iced_baseview::Appearance {
+            background_color: theme.palette().background,
+            text_color: theme.palette().text,
         }
     }
 
