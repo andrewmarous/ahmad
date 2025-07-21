@@ -1,347 +1,115 @@
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use crossbeam::atomic::AtomicCell;
 
-use anyhow::Error;
-use tracing::{info, error};
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::fmt::writer::MakeWriterExt;
-use dotenv::dotenv;
-use rfd::FileDialog;
+use nih_plug::prelude::*;
 
-use iced::{Element, Length, Task};
-use iced::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
+mod editor;
 
-mod agent;
+type AhmadEditor = editor::AhmadEditor;
+type AhmadEditorState = editor::AhmadEditorState;
 
-struct Agent;
-
-#[derive(Default)]
-struct UserTextEditor {
-    content: text_editor::Content
+struct Ahmad {
+    params: Arc<AhmadParams>,
 }
 
-#[derive(Default)]
-struct AgentOutputContainer {
-    filepath: String,
-    separator_text: String,
-    filename: String,
+#[derive(Params)]
+struct AhmadParams {
+    #[persist = "editor-state"]
+    editor_state: Arc<AhmadEditorState>,
 }
 
-#[derive(Default)]
-struct AgentProgressBar {
-    progress: f32
-}
-
-#[derive(Default)]
-struct App {
-    user: UserTextEditor,
-    out_path: AgentOutputContainer,
-    progress: AgentProgressBar,
-    errors: String,
-}
-
-#[derive(Debug, Clone, Default)]
-enum Message {
-    #[default]
-    Empty,
-    UserEdit(text_editor::Action),
-    OutputPathFDSelected,
-    OutputNameChanged(String),
-    PromptSubmitted,
-    AgentProgressUpdated(f32),
-    ResponseComplete(String),
-    CheckConnection,
-    ConnectionResult(String),
-    Reset,
-    AgentError(String),
-}
-
-impl UserTextEditor {
-    fn new() -> Self {
+impl Default for Ahmad {
+    fn default() -> Self {
         Self {
-            content: text_editor::Content::new()
+            params: Arc::new(AhmadParams::default()),
         }
-    }
-
-    fn update(state: &mut Self, message: Message) {
-        match message {
-            Message::UserEdit(action) => {
-                state.content.perform(action);
-            },
-            _ => {}
-        }
-    }
-
-    fn view(state: &Self) -> Element<'_, Message> {
-        text_editor(&state.content)
-            .placeholder(
-                "Ask for a riff, melody, or bassline with a specific instrument. Be sure to include descriptive adjectives and adjectives like 'high quality' or 'clear'."
-            )
-            .on_action(Message::UserEdit)
-            .into()
     }
 }
 
-impl AgentOutputContainer {
-    fn new() -> Self {
+impl Default for AhmadParams {
+    fn default() -> Self {
         Self {
-            filepath: String::from("Select a folder..."),
-            separator_text: String::from("/"),
-            filename: String::new(),
-        }
-    }
-
-    fn view(state: &Self) -> Element<'_, Message> {
-        container(
-            column![
-                text("Output path:").size(10),
-                row![
-                    button(&state.filepath[..])
-                        .on_press(Message::OutputPathFDSelected)
-                        .width(Length::FillPortion(3)),
-                    text(&state.separator_text).size(20),
-                    text_input("example.midi or example.wav", &state.filename[..])
-                        .on_input(Message::OutputNameChanged)
-                        .width(Length::FillPortion(1))
-                ]
-                    .spacing(10)
-                    .padding(20)
-            ]
-                .padding(10)
-        )
-            .align_left(Length::Shrink)
-            .style(container::rounded_box)
-            .into()
-    }
-
-    fn update(state: &mut Self, message: Message) {
-        match message {
-            Message::OutputPathFDSelected => {
-                // init RFD session, pull value from that and assign to state.filepath
-                let filepath = FileDialog::new()
-                    .set_directory(
-                        std::env::current_dir().unwrap().as_path())
-                    .pick_folder()
-                    .expect("Error: rfd's pick_folder failed??");
-                state.filepath = String::from(filepath.to_str().unwrap())
-            },
-            Message::OutputNameChanged(s) => {
-                state.filename = String::from(s);
-            },
-            _ => {}
+            editor_state: AhmadEditorState::from_size((400, 200)),
         }
     }
 }
 
-impl AgentProgressBar {
-    fn new() -> Self {
-        Self {
-            progress: 0.0
-        }
+impl Plugin for Ahmad {
+    const NAME: &'static str = "ahmad";
+    const VENDOR: &'static str = "Andrew Marous";
+    const URL: &'static str = "https://github.com/andrewmarous";
+    const EMAIL: &'static str = "andrewmarous@gmail.com";
+
+    const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
+            ..AudioIOLayout::const_default()
+        },
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(1),
+            main_output_channels: NonZeroU32::new(1),
+            ..AudioIOLayout::const_default()
+        },
+    ];
+
+    const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+
+    type SysExMessage = ();
+    type BackgroundTask = ();
+
+    fn params(&self) -> Arc<dyn Params> {
+        self.params.clone()
     }
 
-    fn view(state: &Self) -> Element<'_, Message> {
-        progress_bar(0.0..=100.0, state.progress).into()
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        Some(Box::new(AhmadEditor {
+            params: Arc::clone(&self.params),
+
+            #[cfg(target_os = "macos")]
+            scaling_factor: AtomicCell::new(None),
+            #[cfg(not(target_os = "macos"))]
+            scaling_factor: AtomicCell::new(Some(1.0)),
+        }))
     }
 
-    fn update(state: &mut Self, message: Message) {
-        match message {
-            Message::PromptSubmitted => {
-                state.progress = 0.0;
-            },
-            Message::AgentProgressUpdated(pct) => {
-                state.progress = pct;
-            },
-            _ => {}
-        }
+    fn initialize(
+            &mut self,
+            _audio_io_layout: &AudioIOLayout,
+            _buffer_config: &BufferConfig,
+            _context: &mut impl InitContext<Self>,
+        ) -> bool {
+        // TODO: disable log spam from wgpu
+
+        true
     }
-}
 
-// need this for Task to work
-// impl Default for Agent {
-//     fn default() -> Self {
-//         Self {
-//             task: Task::none(),
-//             is_generating: false
-//         }
-//     }
-// }
+    fn process(
+            &mut self,
+            buffer: &mut Buffer,
+            aux: &mut AuxiliaryBuffers,
+            context: &mut impl ProcessContext<Self>,
+        ) -> ProcessStatus {
+        for channel_samples in buffer.iter_samples() {
+            // do some audio processing
 
-impl Agent {
-
-    pub fn reset() -> Task<Message> { Task::done(Message::Reset) }
-
-    pub fn check_connection() -> Task<Message> {
-        Task::run(
-            agent::check_backend(),
-            move |res | match res {
-                Ok(_) => {
-                    Message::ConnectionResult(
-                        String::from("Connection to AI backend is successful!")
-                    )
-                },
-                Err(e) => {
-                    error!("Error checking connection to backend: {e}");
-                    Message::ConnectionResult(e.to_string())
-                }
+            if self.params.editor_state.is_open() {
+                // do some processing only when window is open
             }
-        )
-    }
+        }
 
-    pub fn request(prompt: String, filepath: PathBuf) -> Task<Message> {
-        Task::run(
-            agent::request_response_stream(
-                prompt.clone(),
-                filepath.clone()
-            ),
-            move |res| match res {
-                Ok(s) => {
-                    if let Ok(pct) = s.parse() {
-                        Message::AgentProgressUpdated(pct)
-                    } else {
-                        let size: usize = s.parse().unwrap();
-                        Message::ResponseComplete(String::from(
-                            format!("Model response received, file is {} bytes", size)
-                        ))
-                    }
-                }
-                Err(e) => {
-                    Message::AgentError(e.to_string())
-                }
-            }
-        )
+        ProcessStatus::Normal
     }
 }
 
-impl App {
-    fn new() -> Self {
-        Self {
-            user: UserTextEditor::new(),
-            out_path: AgentOutputContainer::new(),
-            progress: AgentProgressBar::new(),
-            errors: String::from("No errors yet. Happy trails!\n"),
-        }
-    }
-
-    fn view(state: &Self) -> Element<'_, Message> {
-        column![
-            UserTextEditor::view(&state.user),
-            AgentOutputContainer::view(&state.out_path),
-            button("Check Connection").on_press(Message::CheckConnection),
-            button("Generate").on_press(Message::PromptSubmitted),
-            AgentProgressBar::view(&state.progress),
-            text(&state.errors[..]).size(20)
-        ]
-            .spacing(20)
-            .padding(20)
-            .into()
-    }
-
-    fn update(state: &mut Self, message: Message)  -> Task<Message> {
-        match message {
-            Message::UserEdit(s) => {
-                info!("user edited model prompt.");
-                UserTextEditor::update(&mut state.user, Message::UserEdit(s));
-                Task::none()
-            },
-            Message::OutputNameChanged(s) => {
-                info!("user changed output filename: {}", s);
-                AgentOutputContainer::update(&mut state.out_path, Message::OutputNameChanged(s));
-                Task::none()
-            },
-            Message::OutputPathFDSelected => {
-                info!("opening folder select dialog...");
-                AgentOutputContainer::update(&mut state.out_path, Message::OutputPathFDSelected);
-                Task::none()
-            }
-            Message::AgentProgressUpdated(f) => {
-                info!("agent progress updated to {}", f);
-                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(f));
-                Task::none()
-            },
-            Message::PromptSubmitted => {
-                state.errors.clear();
-                info!("prompt submitted...");
-                // check for errors
-                // state.errors.clear();
-                // let Some(_) = state.out_path.content.to_str() else {
-                //     state.errors.push_str("Error: no output filepath defined. Please define where
-                //                            you'd like the generated MIDI to go.\n");
-                //     return Task::none()
-                // };
-
-                // construct output filepath
-                let filepath: PathBuf = Path::new(state.out_path.filepath.as_str())
-                    .join(state.out_path.filename.as_str());
-
-                if filepath.exists() {
-                    state.errors
-                        .push_str(format!("Error: current filepath is not pointing at a valid location. Please
-                                           ensure that the filepath points to an existing folder that doesn't
-                                           contain a file named {} \n", state.out_path.filename).as_str());
-                    return Task::none();
-                }
-
-                AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(0.0));
-                Agent::request(
-                    state.user.content.text().to_owned(),
-                    filepath
-                )
-            },
-            Message::AgentError(e) => {
-                error!("Error with agent: {e}");
-                state.errors.clear();
-                let fmtstr = format!("Error generating response: {}", e);
-                state.errors.push_str(&fmtstr);
-                Task::none()
-            },
-            Message::ResponseComplete(user_msg) => {
-                state.errors.clear();
-                state.errors.push_str(&user_msg);
-                Task::none()
-            },
-            Message::Reset => {
-                state.errors.clear();
-                state.user = UserTextEditor::new();
-                state.out_path = AgentOutputContainer::new();
-                Task::none()
-            },
-            Message::CheckConnection => {
-                state.errors.clear();
-                Agent::check_connection()
-            },
-            Message::ConnectionResult(s) => {
-                state.errors.clear();
-                state.errors.push_str(&s[..]);
-                Task::none()
-            },
-            Message::Empty => { Task::none() }
-        }
-    }
-
-    // fn subscription(&self) -> Subscription<Message> {
-    //     if self.agent.is_generating {
-    //         Subscription::run(
-    //             agent::agent::request_response_stream(
-    //                 self.user.content.text().to_owned(),
-    //                 self.out_path.content.to_owned()
-    //             )
-    //         )
-    //     } else {
-    //         Subscription::none()
-    //     }
-    // }
+impl Vst3Plugin for Ahmad {
+    const VST3_CLASS_ID: [u8; 16] = *b"ahmadfoobarfooba";
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Tools];
 }
 
-pub fn main() -> iced::Result {
-    dotenv().ok();
-    let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(non_blocking)
-        .init();
 
-    info!("Starting UI...");
-    iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Agent::reset()))
+fn main() {
+    nih_export_vst3!(Ahmad);
 }
