@@ -10,6 +10,8 @@ use rfd::FileDialog;
 use iced_baseview::{Element, Length, Task, Application};
 use iced_baseview::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
 
+use crate::editor::agent;
+
 struct Agent;
 
 #[derive(Default)]
@@ -217,6 +219,14 @@ impl Application for UIState {
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (Self, Task<Self::Message>) {
+        dotenv().ok();
+        let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(non_blocking)
+            .init();
+
         (Self {
             user: UserTextEditor::new(),
             out_path: AgentOutputContainer::new(),
@@ -346,16 +356,16 @@ impl Application for UIState {
     // }
 }
 
-pub fn main() -> iced::Result {
-    dotenv().ok();
-    let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(non_blocking)
-        .init();
+// pub fn main() -> iced::Result {
+//     dotenv().ok();
+//     let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
+//     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+//     tracing_subscriber::fmt()
+//         .with_max_level(tracing::Level::INFO)
+//         .with_writer(non_blocking)
+//         .init();
 
-    info!("Starting UI...");
-    iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Agent::reset()))
-}
+//     info!("Starting UI...");
+//     iced::application("ahmad 0.1a.0", App::update, App::view)
+//         .run_with( || (App::new(), Agent::reset()))
+// }

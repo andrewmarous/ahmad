@@ -1,22 +1,13 @@
-use baseview::{WindowHandle, WindowOpenOptions, WindowScalePolicy};
-use iced_baseview::{baseview::{Size, WindowOpenOptions, WindowScalePolicy}, Application, Settings};
+use iced_baseview::{baseview::{WindowOpenOptions, WindowScalePolicy}, Settings};
 
 use nih_plug::editor::{Editor, ParentWindowHandle};
 use nih_plug::params::persist::PersistentField;
 use nih_plug::prelude::{GuiContext, ParamSetter, NonZeroU32};
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-use iced_wgpu::wgpu;
-use iced_wgpu::wgpu::SurfaceTargetUnsafe;
-use iced_wgpu::{Renderer as IcedRenderer, Settings as IcedSettings, core::Size};
-use iced_runtime;
 
 use crossbeam::atomic::AtomicCell;
 use serde::{Serialize, Deserialize};
 
 use std::{
-    borrow::Cow,
-    num::NonZeroIsize,
-    ptr::NonNull,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -26,6 +17,7 @@ use std::{
 use crate::{AhmadParams};
 
 pub mod ui;
+mod agent;
 
 // pub struct AhmadWindow {
 //     gui_context: Arc<dyn GuiContext>,
@@ -518,7 +510,7 @@ pub mod ui;
 
 // here we go
 struct IcedWindowHandle {
-    state: i32, // FIX: make this correct type and add to drop()
+    state: Arc<AhmadEditorState>,
     handle: iced_baseview::window::WindowHandle<ui::Message>,
 }
 
@@ -528,40 +520,85 @@ unsafe impl Send for IcedWindowHandle {}
 impl Drop for IcedWindowHandle {
     fn drop(&mut self) {
         self.handle.close_window();
+        self.state.open.store(false, Ordering::Release);
     }
 }
 
-struct AhmadEditor {
-    params: Arc<AhmadParams>,
-    state: ui::UIState,
+// NOTE: no UI state stored here -> UI state will is not serialized between closes.
+// TODO: fix this in future update
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AhmadEditorState {
+    #[serde(with = "nih_plug::params::persist::serialize_atomic_cell")]
     size: AtomicCell<(u32, u32)>,
-    scaling_factor: AtomicCell<Option<f32>>,
+
+    #[serde(skip)]
+    open: AtomicBool,
+}
+
+impl AhmadEditorState {
+    pub fn from_size(size: (u32, u32)) -> Arc<Self> {
+        Arc::new(Self {
+            size: AtomicCell::new(size),
+            open: AtomicBool::new(false),
+        })
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        self.size.load()
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open.load(Ordering::Acquire)
+    }
+}
+
+impl<'a> PersistentField<'a, AhmadEditorState> for Arc<AhmadEditorState> {
+    fn set(&self, new_value: AhmadEditorState) {
+        self.size.store(new_value.size.load());
+    }
+
+    fn map<F, R>(&self, f: F) -> R
+    where
+        F: Fn(&AhmadEditorState) -> R,
+    {
+        f(self)
+    }
+}
+
+pub struct AhmadEditor {
+    pub params: Arc<AhmadParams>,
+
+    // WARN: do not use on macOS
+    pub scaling_factor: AtomicCell<Option<f32>>,
 }
 
 impl Editor for AhmadEditor {
     fn spawn(
             &self,
             parent: ParentWindowHandle,
-            context: Arc<dyn GuiContext>,
+            // context will only be used for parameter editing
+            _context: Arc<dyn GuiContext>,
         ) -> Box<dyn std::any::Any + Send> {
 
-        let size = self.size.load();
+        let size: (u32, u32) = (400, 200);
+
         let settings = Settings {
             window: WindowOpenOptions {
                 title: String::from("ahmad"),
-                size: iced_baseview::baseview::Size::new(400.0, 200.0),
+                size: iced_baseview::baseview::Size::new(size.0 as f64, size.1 as f64),
                 scale: WindowScalePolicy::SystemScaleFactor,
             },
             ..Default::default()
         };
 
+        // TODO: add message passing from window to plugin process via channel in Flags
         let handle = iced_baseview::open_parented::<ui::UIState, ParentWindowHandle>(&parent,
             (), settings);
-        Box::new(IcedWindowHandle {handle, state: 0})
+        Box::new(IcedWindowHandle {handle, state: AhmadEditorState::from_size(size)})
     }
 
     fn size(&self) -> (u32, u32) {
-        self.size.load()
+        self.params.editor_state.size()
     }
 
     fn set_scale_factor(&self, factor: f32) -> bool {
@@ -575,9 +612,9 @@ impl Editor for AhmadEditor {
         true
     }
 
-    fn param_value_changed(&self, id: &str, normalized_value: f32) {}
+    fn param_value_changed(&self, _id: &str, _normalized_value: f32) {}
 
     fn param_values_changed(&self) {}
 
-    fn param_modulation_changed(&self, id: &str, modulation_offset: f32) {}
+    fn param_modulation_changed(&self, _id: &str, _modulation_offset: f32) {}
 }

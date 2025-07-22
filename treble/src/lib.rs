@@ -5,8 +5,8 @@ use nih_plug::prelude::*;
 
 mod editor;
 
-type AhmadEditor = editor::AhmadEditor;
 type AhmadEditorState = editor::AhmadEditorState;
+type AhmadEditor = editor::AhmadEditor;
 
 struct Ahmad {
     params: Arc<AhmadParams>,
@@ -89,10 +89,10 @@ impl Plugin for Ahmad {
     fn process(
             &mut self,
             buffer: &mut Buffer,
-            aux: &mut AuxiliaryBuffers,
-            context: &mut impl ProcessContext<Self>,
+            _aux: &mut AuxiliaryBuffers,
+            _context: &mut impl ProcessContext<Self>,
         ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
+        for _channel_samples in buffer.iter_samples() {
             // do some audio processing
 
             if self.params.editor_state.is_open() {
@@ -109,7 +109,4 @@ impl Vst3Plugin for Ahmad {
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Tools];
 }
 
-
-fn main() {
-    nih_export_vst3!(Ahmad);
-}
+nih_export_vst3!(Ahmad);

@@ -1,7 +1,10 @@
 [package]
-name = "plugin"
+name = "ahmad"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
 futures = "0.3.31"
@@ -25,4 +28,5 @@ crossbeam = "0.8.4"
 iced_baseview = { git = "https://github.com/BillyDM/iced_baseview.git", default-features = false, features = ["wgpu"] }
 raw-window-handle = "0.6.2"
 
-
+[workspace]
+members = ["xtask"]
