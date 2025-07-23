@@ -27,6 +27,7 @@ pollster = "0.4.0"
 crossbeam = "0.8.4"
 iced_baseview = { git = "https://github.com/BillyDM/iced_baseview.git", default-features = false, features = ["wgpu"] }
 raw-window-handle = "0.6.2"
+directories = "6.0.0"
 
 [workspace]
 members = ["xtask"]

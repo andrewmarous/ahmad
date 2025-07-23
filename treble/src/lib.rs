@@ -1,5 +1,6 @@
-use std::{sync::{Arc, Once}};
+use std::{fs, path::PathBuf, sync::{Arc, Once}};
 use crossbeam::atomic::AtomicCell;
+use directories::ProjectDirs;
 
 use nih_plug::prelude::*;
 
@@ -8,18 +9,30 @@ mod editor;
 type AhmadEditorState = editor::AhmadEditorState;
 type AhmadEditor = editor::AhmadEditor;
 
-static INIT_LOGGER: Once = Once::new();
+static INIT_FILES: Once = Once::new();
 
-fn init_logger() {
-    INIT_LOGGER.call_once( || {
+fn init_metadata() {
+    INIT_FILES.call_once( || {
+        // TODO: find production-ready way to get logger to output to a specific file (might need to
+        // fork nih_plug)
+
         let _ = nih_plug::wrapper::setup_logger();
         nih_log!("Logger initialized");
+        nih_log!("data directory path: {}", env!("NIH_LOG"));
         std::panic::set_hook(
             Box::new(|info| {
                 nih_error!("PANIC: {}", info);
             })
         )
     });
+}
+
+fn init_data_dir() -> PathBuf {
+    let proj = ProjectDirs::from("com", "Andrew Marous", "Ahmad")
+        .expect("No valid home directory for plugin.");
+    let dir = proj.data_dir();
+    fs::create_dir_all(dir).expect("A directory in ProjectDirs::from().data_dir() doesn't exist.");
+    dir.to_path_buf()
 }
 
 struct Ahmad {
@@ -34,7 +47,6 @@ struct AhmadParams {
 
 impl Default for Ahmad {
     fn default() -> Self {
-        init_logger();
         nih_log!("Initializing plugin...");
         Self {
             params: Arc::new(AhmadParams::default()),
@@ -45,7 +57,7 @@ impl Default for Ahmad {
 impl Default for AhmadParams {
     fn default() -> Self {
         Self {
-            editor_state: AhmadEditorState::from_size((400, 200)),
+            editor_state: AhmadEditorState::from_size((800, 800)),
         }
     }
 }
@@ -81,7 +93,7 @@ impl Plugin for Ahmad {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        init_logger();
+        init_metadata();
         Some(Box::new(AhmadEditor {
             params: Arc::clone(&self.params),
 
@@ -98,8 +110,7 @@ impl Plugin for Ahmad {
             _buffer_config: &BufferConfig,
             _context: &mut impl InitContext<Self>,
         ) -> bool {
-        // TODO: disable log spam from wgpu
-        init_logger();
+        init_metadata();
 
         true
     }

@@ -11,6 +11,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
+        Mutex
     },
 };
 
@@ -565,6 +566,10 @@ impl<'a> PersistentField<'a, AhmadEditorState> for Arc<AhmadEditorState> {
     }
 }
 
+pub struct UIFlags {
+    context: Arc<dyn GuiContext>,
+}
+
 pub struct AhmadEditor {
     pub params: Arc<AhmadParams>,
 
@@ -576,11 +581,11 @@ impl Editor for AhmadEditor {
     fn spawn(
             &self,
             parent: ParentWindowHandle,
-            // context will only be used for parameter editing
-            _context: Arc<dyn GuiContext>,
+            // context is for all communication with host (parameters, window)
+            context: Arc<dyn GuiContext>,
         ) -> Box<dyn std::any::Any + Send> {
 
-        let size: (u32, u32) = (400, 200);
+        let size: (u32, u32) = self.params.editor_state.size();
 
         let settings = Settings {
             window: WindowOpenOptions {
@@ -592,8 +597,14 @@ impl Editor for AhmadEditor {
         };
 
         // TODO: add message passing from window to plugin process via channel in Flags
-        let handle = iced_baseview::open_parented::<ui::UIState, ParentWindowHandle>(&parent,
-            (), settings);
+        let handle = iced_baseview::open_parented::<ui::UIState, ParentWindowHandle>(
+            &parent,
+            UIFlags { context },
+            settings
+        );
+
+        self.params.editor_state.open.store(true, Ordering::Release);
+
         Box::new(IcedWindowHandle {handle, state: AhmadEditorState::from_size(size)})
     }
 

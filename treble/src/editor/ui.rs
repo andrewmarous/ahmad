@@ -1,15 +1,19 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use nih_plug::{nih_log, nih_error};
+use nih_plug::prelude::GuiContext;
+use nih_plug::wrapper::vst3::Wrapper;
+use nih_plug::{nih_error, nih_log, wrapper};
 
 use anyhow::Error;
 use dotenv::dotenv;
 use rfd::FileDialog;
 
-use iced_baseview::{Element, Length, Task, Application};
+use iced_baseview::{window, window::WindowSubs, futures::Subscription, Element, Length, Task, Size, Application};
 use iced_baseview::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
+use iced_baseview::core as iced;
 
-use crate::editor::agent;
+use crate::editor::{agent, UIFlags};
 
 struct Agent;
 
@@ -32,6 +36,7 @@ struct AgentProgressBar {
 
 #[derive(Default)]
 pub struct UIState {
+    // context: Arc<dyn GuiContext>,
     user: UserTextEditor,
     out_path: AgentOutputContainer,
     progress: AgentProgressBar,
@@ -42,6 +47,7 @@ pub struct UIState {
 pub enum Message {
     #[default]
     Empty,
+    Window(iced::window::Event),
     UserEdit(text_editor::Action),
     OutputPathFDSelected,
     OutputNameChanged(String),
@@ -215,11 +221,12 @@ impl Application for UIState {
     type Message = Message;
     type Theme = iced_baseview::Theme;
     type Executor = iced_baseview::executor::Default;
-    type Flags = ();
+    type Flags = UIFlags;
 
     fn new(_flags: Self::Flags) -> (Self, Task<Self::Message>) {
         dotenv().ok();
         (Self {
+            // context: flags.context,
             user: UserTextEditor::new(),
             out_path: AgentOutputContainer::new(),
             progress: AgentProgressBar::new(),
@@ -241,27 +248,32 @@ impl Application for UIState {
             .into()
     }
 
+
     fn update(&mut self, message: Message)  -> Task<Message> {
         match message {
+            Message::Window(event) => {
+                // match event {
+                //     iced::window::Event::Resized(_) => {
+                //         iced::window::RedrawRequest;
+                //         self.context.request_resize(); }
+                //     _ => {}
+                // }
+            }
             Message::UserEdit(s) => {
                 nih_log!("user edited model prompt.");
                 UserTextEditor::update(&mut self.user, Message::UserEdit(s));
-                Task::none()
             },
             Message::OutputNameChanged(s) => {
                 nih_log!("user changed output filename: {}", s);
                 AgentOutputContainer::update(&mut self.out_path, Message::OutputNameChanged(s));
-                Task::none()
             },
             Message::OutputPathFDSelected => {
                 nih_log!("opening folder select dialog...");
                 AgentOutputContainer::update(&mut self.out_path, Message::OutputPathFDSelected);
-                Task::none()
             }
             Message::AgentProgressUpdated(f) => {
                 nih_log!("agent progress updated to {}", f);
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(f));
-                Task::none()
             },
             Message::PromptSubmitted => {
                 self.errors.clear();
@@ -287,44 +299,41 @@ impl Application for UIState {
                 }
 
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(0.0));
-                Agent::request(
+                return Agent::request(
                     self.user.content.text().to_owned(),
                     filepath
-                )
+                );
             },
             Message::AgentError(e) => {
                 nih_error!("Error with agent: {e}");
                 self.errors.clear();
                 let fmtstr = format!("Error generating response: {}", e);
                 self.errors.push_str(&fmtstr);
-                Task::none()
             },
             Message::ResponseComplete(user_msg) => {
                 self.errors.clear();
                 self.errors.push_str(&user_msg);
-                Task::none()
             },
             Message::Reset => {
                 self.errors.clear();
                 self.user = UserTextEditor::new();
                 self.out_path = AgentOutputContainer::new();
-                Task::none()
             },
             Message::CheckConnection => {
                 self.errors.clear();
-                Agent::check_connection()
+                return Agent::check_connection();
             },
             Message::ConnectionResult(s) => {
                 self.errors.clear();
                 self.errors.push_str(&s[..]);
-                Task::none()
             },
-            Message::Empty => { Task::none() }
+            Message::Empty => {}
         }
+        Task::none()
     }
 
     fn theme(&self) -> Self::Theme {
-        iced_baseview::Theme::KanagawaLotus
+       iced::Theme::Dark
     }
 
     fn style(&self, theme: &Self::Theme) -> iced_baseview::Appearance {
@@ -334,17 +343,8 @@ impl Application for UIState {
         }
     }
 
-    // fn subscription(&self) -> Subscription<Message> {
-    //     if self.agent.is_generating {
-    //         Subscription::run(
-    //             agent::agent::request_response_stream(
-    //                 self.user.content.text().to_owned(),
-    //                 self.out_path.content.to_owned()
-    //             )
-    //         )
-    //     } else {
-    //         Subscription::none()
-    //     }
+    // fn subscription(&self, window_subs: &mut WindowSubs<Message>) -> Subscription<Message> {
+    //     iced_baseview::window::events().map(Message::Window)
     // }
 }
 
