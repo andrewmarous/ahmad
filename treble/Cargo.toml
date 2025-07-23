@@ -30,3 +30,6 @@ raw-window-handle = "0.6.2"
 
 [workspace]
 members = ["xtask"]
+
+[profile.release]
+panic = "unwind"

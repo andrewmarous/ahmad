@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::{Arc, Once}};
 use crossbeam::atomic::AtomicCell;
 
 use nih_plug::prelude::*;
@@ -7,6 +7,20 @@ mod editor;
 
 type AhmadEditorState = editor::AhmadEditorState;
 type AhmadEditor = editor::AhmadEditor;
+
+static INIT_LOGGER: Once = Once::new();
+
+fn init_logger() {
+    INIT_LOGGER.call_once( || {
+        let _ = nih_plug::wrapper::setup_logger();
+        nih_log!("Logger initialized");
+        std::panic::set_hook(
+            Box::new(|info| {
+                nih_error!("PANIC: {}", info);
+            })
+        )
+    });
+}
 
 struct Ahmad {
     params: Arc<AhmadParams>,
@@ -20,6 +34,8 @@ struct AhmadParams {
 
 impl Default for Ahmad {
     fn default() -> Self {
+        init_logger();
+        nih_log!("Initializing plugin...");
         Self {
             params: Arc::new(AhmadParams::default()),
         }
@@ -65,6 +81,7 @@ impl Plugin for Ahmad {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        init_logger();
         Some(Box::new(AhmadEditor {
             params: Arc::clone(&self.params),
 
@@ -82,6 +99,7 @@ impl Plugin for Ahmad {
             _context: &mut impl InitContext<Self>,
         ) -> bool {
         // TODO: disable log spam from wgpu
+        init_logger();
 
         true
     }
@@ -108,5 +126,7 @@ impl Vst3Plugin for Ahmad {
     const VST3_CLASS_ID: [u8; 16] = *b"ahmadfoobarfooba";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Tools];
 }
+
+// add logging and steinberg API safety
 
 nih_export_vst3!(Ahmad);
