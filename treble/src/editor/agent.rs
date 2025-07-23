@@ -1,10 +1,11 @@
 use std::env;
 
+use nih_plug::{nih_log, nih_error};
+
 use futures::StreamExt;
 use iced_futures::stream::try_channel;
 use futures::{stream::Stream, SinkExt};
 use reqwest::blocking::Client;
-use tracing::info;
 use url::Url;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::fs::File;
@@ -38,7 +39,7 @@ fn api_url(endpoint: &str) -> Result<Url, Error> {
 }
 
 pub fn check_backend() -> impl Stream<Item= Result<(), Error>> {
-    info!("checking backend connection...");
+    nih_log!("checking backend connection...");
     let port: u16 = 8000;
     let url: String = env::var("API_URL").expect("API_URL must be defined");
     let port_check = async move {
@@ -59,7 +60,7 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
                 negative_prompt: "Low quality, average quality".into(),
                 filename: "",
             };
-            info!("built request payload.");
+            nih_log!("built request payload.");
             sender.send(String::from("66.0")).await?;
 
             let response = client
@@ -67,15 +68,15 @@ pub fn request_response_stream(prompt: String, output_path: PathBuf) -> impl Str
                 .json(&payload)
                 .send()?;
 
-            info!("received generate request.");
+            nih_log!("received generate request.");
             sender.send(String::from("99.0")).await?;
 
-            info!("building file...");
+            nih_log!("building file...");
             let bytes = response.bytes()?;
             let len = bytes.len();
 
             fs::write(output_path, bytes)?;
-            info!("response file successfully built.");
+            nih_log!("response file successfully built.");
             sender.send(String::from(
                 format!("{}", len)
             )).await?;

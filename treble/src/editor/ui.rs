@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use nih_plug::{nih_log, nih_error};
+
 use anyhow::Error;
-use tracing::{info, error};
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::fmt::writer::MakeWriterExt;
 use dotenv::dotenv;
 use rfd::FileDialog;
 
@@ -180,7 +179,7 @@ impl Agent {
                     )
                 },
                 Err(e) => {
-                    error!("Error checking connection to backend: {e}");
+                    nih_error!("Error checking connection to backend: {e}");
                     Message::ConnectionResult(e.to_string())
                 }
             }
@@ -220,13 +219,6 @@ impl Application for UIState {
 
     fn new(_flags: Self::Flags) -> (Self, Task<Self::Message>) {
         dotenv().ok();
-        let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .with_writer(non_blocking)
-            .init();
-
         (Self {
             user: UserTextEditor::new(),
             out_path: AgentOutputContainer::new(),
@@ -252,28 +244,28 @@ impl Application for UIState {
     fn update(&mut self, message: Message)  -> Task<Message> {
         match message {
             Message::UserEdit(s) => {
-                info!("user edited model prompt.");
+                nih_log!("user edited model prompt.");
                 UserTextEditor::update(&mut self.user, Message::UserEdit(s));
                 Task::none()
             },
             Message::OutputNameChanged(s) => {
-                info!("user changed output filename: {}", s);
+                nih_log!("user changed output filename: {}", s);
                 AgentOutputContainer::update(&mut self.out_path, Message::OutputNameChanged(s));
                 Task::none()
             },
             Message::OutputPathFDSelected => {
-                info!("opening folder select dialog...");
+                nih_log!("opening folder select dialog...");
                 AgentOutputContainer::update(&mut self.out_path, Message::OutputPathFDSelected);
                 Task::none()
             }
             Message::AgentProgressUpdated(f) => {
-                info!("agent progress updated to {}", f);
+                nih_log!("agent progress updated to {}", f);
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(f));
                 Task::none()
             },
             Message::PromptSubmitted => {
                 self.errors.clear();
-                info!("prompt submitted...");
+                nih_log!("prompt submitted...");
                 // check for errors
                 // self.errors.clear();
                 // let Some(_) = self.out_path.content.to_str() else {
@@ -301,7 +293,7 @@ impl Application for UIState {
                 )
             },
             Message::AgentError(e) => {
-                error!("Error with agent: {e}");
+                nih_error!("Error with agent: {e}");
                 self.errors.clear();
                 let fmtstr = format!("Error generating response: {}", e);
                 self.errors.push_str(&fmtstr);
@@ -365,7 +357,7 @@ impl Application for UIState {
 //         .with_writer(non_blocking)
 //         .init();
 
-//     info!("Starting UI...");
+//     nih_log!("Starting UI...");
 //     iced::application("ahmad 0.1a.0", App::update, App::view)
 //         .run_with( || (App::new(), Agent::reset()))
 // }
