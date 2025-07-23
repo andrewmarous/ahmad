@@ -62,6 +62,7 @@ name = "ahmad"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "baseview 0.1.0 (git+https://github.com/RustAudio/baseview?tab=MIT-2-ov-file)",
  "crossbeam",
  "directories",
  "dotenv",
@@ -418,6 +419,23 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "baseview"
 version = "0.1.0"
 source = "git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2#579130ecb4f9f315ae52190af42f0ea46aeaa4a2"
+dependencies = [
+ "cocoa",
+ "core-foundation 0.9.4",
+ "keyboard-types",
+ "nix 0.22.3",
+ "objc",
+ "raw-window-handle 0.5.2",
+ "uuid",
+ "winapi",
+ "x11",
+ "x11rb",
+]
+
+[[package]]
+name = "baseview"
+version = "0.1.0"
+source = "git+https://github.com/RustAudio/baseview?tab=MIT-2-ov-file#3724a00c970a9cd10a3494fa3c37bca66d631bb7"
 dependencies = [
  "cocoa",
  "core-foundation 0.9.4",
@@ -2008,7 +2026,7 @@ name = "iced_baseview"
 version = "0.1.0"
 source = "git+https://github.com/BillyDM/iced_baseview.git#a0842a8205c852127981e27de6342cf2e665562f"
 dependencies = [
- "baseview",
+ "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=579130ecb4f9f315ae52190af42f0ea46aeaa4a2)",
  "cfg-if",
  "iced_graphics",
  "iced_renderer",

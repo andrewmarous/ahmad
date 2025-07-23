@@ -28,6 +28,7 @@ crossbeam = "0.8.4"
 iced_baseview = { git = "https://github.com/BillyDM/iced_baseview.git", default-features = false, features = ["wgpu"] }
 raw-window-handle = "0.6.2"
 directories = "6.0.0"
+baseview = { git = "https://github.com/RustAudio/baseview?tab=MIT-2-ov-file" }
 
 [workspace]
 members = ["xtask"]

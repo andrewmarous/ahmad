@@ -5,6 +5,7 @@ use directories::ProjectDirs;
 use nih_plug::prelude::*;
 
 mod editor;
+mod test;
 
 type AhmadEditorState = editor::AhmadEditorState;
 type AhmadEditor = editor::AhmadEditor;
