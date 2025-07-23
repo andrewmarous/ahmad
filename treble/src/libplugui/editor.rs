@@ -1,16 +1,19 @@
 //! And [`Editor`] implementation for iced.
 
-use baseview::{WindowOpenOptions, WindowScalePolicy};
+use crossbeam::epoch::Pointable;
+use iced_baseview::baseview::{WindowScalePolicy, WindowOpenOptions, Size};
+use iced_baseview::settings::{Settings, IcedBaseviewSettings};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel;
-use iced_baseview::
 use nih_plug::prelude::{Editor, GuiContext, ParentWindowHandle};
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
+use raw_window_handle::{HandleError, HasRawWindowHandle, RawWindowHandle};
+use std::num::{NonZeroIsize, NonZeroU32};
+use std::ptr::NonNull;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 
-use crate::test::{wrapper, editor::{IcedEditor, IcedState, ParameterUpdate}};
+use crate::libplugui::{wrapper, IcedEditor, IcedState, ParameterUpdate};
 
 /// An [`Editor`] implementation that renders an iced [`Application`].
 pub(crate) struct IcedEditorWrapper<E: IcedEditor> {
@@ -52,6 +55,11 @@ unsafe impl HasRawWindowHandle for ParentWindowHandleAdapter {
     }
 }
 
+// TODO: struct-ify open_parented flags
+// pub struct EditorFlags {
+//     context: Arc<dyn GuiContext>,
+// }
+
 impl<E: IcedEditor> Editor for IcedEditorWrapper<E> {
     fn spawn(
         &self,
@@ -63,53 +71,31 @@ impl<E: IcedEditor> Editor for IcedEditorWrapper<E> {
 
         // TODO: iced_baseview does not have gracefuly error handling for context creation failures.
         //       This will panic if the context could not be created.
-        let window = IcedWindow::<wrapper::IcedEditorWrapperApplication<E>>::open_parented(
+        let window = iced_baseview::open_parented::<wrapper::IcedEditorWrapperApplication<E>, ParentWindowHandleAdapter>(
             &ParentWindowHandleAdapter(parent),
+            // editor needs GUI context
+            (
+                context,
+                self.parameter_updates_receiver.clone(),
+                self.initialization_flags.clone(),
+            ),
             Settings {
                 window: WindowOpenOptions {
                     title: String::from("iced window"),
                     // Baseview should be doing the DPI scaling for us
-                    size: baseview::Size::new(unscaled_width as f64, unscaled_height as f64),
+                    size: Size::new(unscaled_width as f64, unscaled_height as f64),
                     // NOTE: For some reason passing 1.0 here causes the UI to be scaled on macOS but
                     //       not the mouse events.
                     scale: scaling_factor
                         .map(|factor| WindowScalePolicy::ScaleFactor(factor as f64))
                         .unwrap_or(WindowScalePolicy::SystemScaleFactor),
 
-                    #[cfg(feature = "opengl")]
-                    gl_config: Some(baseview::gl::GlConfig {
-                        // FIXME: glow_glyph forgot to add an `#extension`, so this won't work under
-                        //        OpenGL 3.2 at the moment. With that change applied this should work on
-                        //        OpenGL 3.2/macOS.
-                        version: (3, 3),
-                        red_bits: 8,
-                        blue_bits: 8,
-                        green_bits: 8,
-                        alpha_bits: 8,
-                        depth_bits: 24,
-                        stencil_bits: 8,
-                        samples: None,
-                        srgb: true,
-                        double_buffer: true,
-                        vsync: true,
-                        ..Default::default()
-                    }),
-                    // FIXME: Rust analyzer always thinks baseview/opengl is enabled even if we
-                    //        don't explicitly enable it, so you'd get a compile error if this line
-                    //        is missing
-                    #[cfg(not(feature = "opengl"))]
-                    gl_config: None,
                 },
                 iced_baseview: IcedBaseviewSettings {
                     ignore_non_modifier_keys: false,
                     always_redraw: true,
                 },
-                // We use this wrapper to be able to pass the GUI context to the editor
-                flags: (
-                    context,
-                    self.parameter_updates_receiver.clone(),
-                    self.initialization_flags.clone(),
-                ),
+                ..Default::default()
             },
         );
 
@@ -155,7 +141,7 @@ impl<E: IcedEditor> Editor for IcedEditorWrapper<E> {
 /// The window handle used for [`IcedEditorWrapper`].
 struct IcedEditorHandle<Message: 'static + Send> {
     iced_state: Arc<IcedState>,
-    window: iced_baseview::WindowHandle<Message>,
+    window: iced_baseview::window::WindowHandle<Message>,
 }
 
 /// The window handle enum stored within 'WindowHandle' contains raw pointers. Is there a way around

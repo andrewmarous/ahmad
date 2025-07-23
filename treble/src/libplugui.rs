@@ -1,4 +1,3 @@
-use baseview::WindowScalePolicy;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel;
 use nih_plug::params::persist::PersistentField;
@@ -13,9 +12,14 @@ use iced::{
     Executor, Task, Subscription, Element,
 };
 
+mod editor;
+mod wrapper;
+mod ui;
+
 use iced_baseview::window::WindowSubs;
 
-use crate::test::editor;
+type ParamMessage = wrapper::ParamMessage;
+
 
 /// Create an [`Editor`] instance using [iced](https://github.com/iced-rs/iced). The rough idea is
 /// that you implement [`IcedEditor`], which is roughly analogous to iced's regular [`Application`]
@@ -95,7 +99,7 @@ pub trait IcedEditor: 'static + Send + Sync + Sized {
     }
 
     /// See [`Application::view`].
-    fn view(&mut self) -> Element<'_, Self::Message>;
+    fn view(&self) -> Element<Self::Message>;
 
     // /// See [`Application::background_color`].
     // fn background_color(&self) -> Color {
@@ -121,10 +125,10 @@ pub trait IcedEditor: 'static + Send + Sync + Sized {
 pub struct IcedState {
     /// The window's size in logical pixels before applying `scale_factor`.
     #[serde(with = "nih_plug::params::persist::serialize_atomic_cell")]
-    size: AtomicCell<(u32, u32)>,
+    pub size: AtomicCell<(u32, u32)>,
     /// Whether the editor's window is currently open.
     #[serde(skip)]
-    open: AtomicBool,
+    pub open: AtomicBool,
 }
 
 impl<'a> PersistentField<'a, IcedState> for Arc<IcedState> {
@@ -164,3 +168,4 @@ impl IcedState {
 
 /// A marker struct to indicate that a parameter update has happened.
 pub(crate) struct ParameterUpdate;
+

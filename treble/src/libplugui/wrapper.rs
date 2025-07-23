@@ -3,14 +3,20 @@
 //! `nih_plug_iced`.
 
 use crossbeam::channel;
-use nih_plug::prelude::GuiContext;
+use nih_plug::prelude::{GuiContext, ParamPtr};
 use std::sync::Arc;
 
-use crate::futures::FutureExt;
-use crate::{
-    futures, subscription, Application, Color, Task, Element, IcedEditor, ParameterUpdate,
-    Subscription, WindowQueue, WindowScalePolicy, WindowSubs,
+use futures::FutureExt;
+// TODO: find subscription module
+use iced::{
+    futures, subscription, Color, Task, Element, ParameterUpdate,
+    Subscription,
 };
+
+use iced_baseview::futures::subscription;
+use iced_baseview::{window::{WindowQueue, WindowSubs}, Application};
+use baseview::WindowScalePolicy;
+use crate::test::lib1::IcedEditor;
 
 /// Wraps an `iced_baseview` [`Application`] around [`IcedEditor`]. Needed to allow editors to
 /// always receive a copy of the GUI context.
@@ -51,6 +57,7 @@ impl<E: IcedEditor> Clone for Message<E> {
 
 impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
     type Executor = E::Executor;
+    type Theme = iced::Theme;
     type Message = Message<E>;
     type Flags = (
         Arc<dyn GuiContext>,
@@ -60,7 +67,7 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
 
     fn new(
         (context, parameter_updates_receiver, flags): Self::Flags,
-    ) -> (Self, Command<Self::Message>) {
+    ) -> (Self, Task<Self::Message>) {
         let (editor, command) = E::new(flags, context);
 
         (
@@ -75,16 +82,15 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
     #[inline]
     fn update(
         &mut self,
-        window: &mut WindowQueue,
         message: Self::Message,
-    ) -> Command<Self::Message> {
+    ) -> Task<Self::Message> {
         match message {
             Message::EditorMessage(message) => self
                 .editor
-                .update(window, message)
+                .update(message)
                 .map(Message::EditorMessage),
             // This message only exists to force a redraw
-            Message::ParameterUpdate => Command::none(),
+            Message::ParameterUpdate => Task::none(),
         }
     }
 
@@ -138,23 +144,36 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
     }
 
     #[inline]
-    fn view(&mut self) -> Element<'_, Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         self.editor.view().map(Message::EditorMessage)
     }
 
     #[inline]
-    fn background_color(&self) -> Color {
-        self.editor.background_color()
+    fn theme(&self) -> Self::Theme {
+        iced::Theme::Dark
     }
 
     #[inline]
-    fn scale_policy(&self) -> WindowScalePolicy {
-        self.editor.scale_policy()
+    fn title(&self) -> String {
+        String::from(env!("CARGO_PKG_NAME"))
     }
 
     #[inline]
-    fn renderer_settings() -> iced_baseview::backend::settings::Settings {
-        E::renderer_settings()
+    fn style(&self, theme: &Self::Theme) -> iced_baseview::Appearance {
+        iced_baseview::Appearance {
+            background_color: theme.palette().background,
+            text_color: theme.palette().text,
+        }
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ParamMessage {
+    /// Begin an automation gesture for a parameter.
+    BeginSetParameter(ParamPtr),
+    /// Set a parameter to a new normalized value. This needs to be surrounded by a matching
+    /// `BeginSetParameter` and `EndSetParameter`.
+    SetParameterNormalized(ParamPtr, f32),
+    /// End an automation gesture for a parameter.
+    EndSetParameter(ParamPtr),
+}

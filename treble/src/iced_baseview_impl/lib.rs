@@ -1,16 +1,14 @@
-use std::{
-    sync::{Arc, Once},
-    path::PathBuf,
-    fs,
-};
-
+use std::{fs, path::PathBuf, sync::{Arc, Once}};
+use crossbeam::atomic::AtomicCell;
 use directories::ProjectDirs;
+
 use nih_plug::prelude::*;
 
-use crate::editor::IcedState;
+mod editor;
+mod test;
 
-mod libplugui;
-mod ui;
+type AhmadEditorState = editor::AhmadEditorState;
+type AhmadEditor = editor::AhmadEditor;
 
 static INIT_FILES: Once = Once::new();
 
@@ -45,7 +43,7 @@ struct Ahmad {
 #[derive(Params)]
 struct AhmadParams {
     #[persist = "editor-state"]
-    editor_state: Arc<IcedState>,
+    editor_state: Arc<AhmadEditorState>,
 }
 
 impl Default for Ahmad {
@@ -60,7 +58,7 @@ impl Default for Ahmad {
 impl Default for AhmadParams {
     fn default() -> Self {
         Self {
-            editor_state: editor::default_state(),
+            editor_state: AhmadEditorState::from_size((800, 800)),
         }
     }
 }
@@ -96,9 +94,15 @@ impl Plugin for Ahmad {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        editor::create(
-            self.params.clone()
-        )
+        init_metadata();
+        Some(Box::new(AhmadEditor {
+            params: Arc::clone(&self.params),
+
+            #[cfg(target_os = "macos")]
+            scaling_factor: AtomicCell::new(None),
+            #[cfg(not(target_os = "macos"))]
+            scaling_factor: AtomicCell::new(Some(1.0)),
+        }))
     }
 
     fn initialize(
