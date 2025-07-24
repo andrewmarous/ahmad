@@ -21,8 +21,8 @@ mod agent;
 struct Agent;
 
 #[derive(Default)]
-struct UserTextEditor {
-    content: Arc<Mutex<text_editor::Content>>
+struct UserTextInput {
+    content: String
 }
 
 #[derive(Default)]
@@ -37,14 +37,13 @@ struct AgentProgressBar {
     progress: f32
 }
 
-#[derive(Default)]
 pub struct AhmadEditor {
     // plugin fields
     context: Arc<dyn GuiContext>,
     params: Arc<AhmadParams>,
 
     // ui fields
-    user: UserTextEditor,
+    user: UserTextInput,
     out_path: AgentOutputContainer,
     progress: AgentProgressBar,
     errors: String,
@@ -55,7 +54,8 @@ pub enum Message {
     #[default]
     Empty,
     Window(iced::window::Event),
-    UserEdit(text_editor::Action),
+    UserEdit(String),
+    // UserEdit(text_editor::Action),
     OutputPathFDSelected,
     OutputNameChanged(String),
     PromptSubmitted,
@@ -69,30 +69,36 @@ pub enum Message {
     Param(ParamMessage),
 }
 
-impl UserTextEditor {
+impl UserTextInput {
     fn new() -> Self {
         Self {
-            content: Arc::new(Mutex::new(text_editor::Content::new()))
+            content: String::new()
         }
     }
 
     fn update(state: &mut Self, message: Message) {
         match message {
-            Message::UserEdit(action) => {
-                state.content.lock().unwrap().perform(action);
+            Message::UserEdit(string) => {
+                state.content = string
             },
             _ => {}
         }
     }
 
     fn view(state: &Self) -> Element<'_, Message> {
-        let content = state.content.lock().unwrap();
-        text_editor(&content)
-            .placeholder(
-                "Ask for a riff, melody, or bassline with a specific instrument. Be sure to include descriptive adjectives and adjectives like 'high quality' or 'clear'."
-            )
-            .on_action(Message::UserEdit)
-            .into()
+        // let text = state.content.lock().unwrap().text();
+        // let mut new_content = text_editor::Content::new();
+        // new_content.perform(
+        //     text_editor::Action::Edit(
+        //         text_editor::Edit::Paste(
+        //             Arc::new(String::from(text)))));
+
+        // TODO: try to find a way to make this a thread-safe text editor
+        let editor = text_input(&"Ask for a riff, melody, or bassline with a specific instrument. Be sure to include descriptive adjectives and adjectives like 'high quality' or 'clear'.",
+            &state.content)
+            .on_input(Message::UserEdit)
+            .into();
+        editor
     }
 }
 
@@ -227,7 +233,7 @@ impl Agent {
     }
 }
 
-impl IcedEditor for AhmadEditor{
+impl IcedEditor for AhmadEditor {
     type Executor = iced_baseview::executor::Default;
     type Message = Message;
     type InitializationFlags = Arc<AhmadParams>; // Pass params as initialization flags
@@ -241,7 +247,7 @@ impl IcedEditor for AhmadEditor{
             Self {
                 context,
                 params,
-                user: UserTextEditor::new(),
+                user: UserTextInput::new(),
                 out_path: AgentOutputContainer::new(),
                 progress: AgentProgressBar::new(),
                 errors: String::from("No errors yet. Happy trails!\n"),
@@ -267,7 +273,7 @@ impl IcedEditor for AhmadEditor{
             },
             Message::UserEdit(s) => {
                 nih_log!("user edited model prompt.");
-                UserTextEditor::update(&mut self.user, Message::UserEdit(s));
+                UserTextInput::update(&mut self.user, Message::UserEdit(s));
                 Task::none()
             },
             Message::OutputNameChanged(s) => {
@@ -304,7 +310,7 @@ impl IcedEditor for AhmadEditor{
 
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(0.0));
                 return Agent::request(
-                    self.user.content.lock().unwrap().text().to_owned(),
+                    self.user.content.clone(),
                     filepath
                 );
             },
@@ -322,7 +328,7 @@ impl IcedEditor for AhmadEditor{
             },
             Message::Reset => {
                 self.errors.clear();
-                self.user = UserTextEditor::new();
+                self.user = UserTextInput::new();
                 self.out_path = AgentOutputContainer::new();
                 Task::none()
             },
@@ -348,7 +354,7 @@ impl IcedEditor for AhmadEditor{
 
     fn view(&self) -> Element<Self::Message> {
         column![
-            UserTextEditor::view(&self.user),
+            UserTextInput::view(&self.user),
             AgentOutputContainer::view(&self.out_path),
             button("Check Connection").on_press(Message::CheckConnection),
             button("Generate").on_press(Message::PromptSubmitted),
