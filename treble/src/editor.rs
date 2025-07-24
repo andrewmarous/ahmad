@@ -374,6 +374,6 @@ pub fn create(params: Arc<AhmadParams>) -> Option<Box<dyn nih_plug::prelude::Edi
 }
 
 pub fn default_state() -> Arc<IcedState> {
-    IcedState::from_size(800, 800)
+    IcedState::from_size(800, 400)
 }
 

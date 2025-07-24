@@ -18,7 +18,7 @@ mod ui;
 
 use iced_baseview::window::WindowSubs;
 
-type ParamMessage = wrapper::ParamMessage;
+pub type ParamMessage = wrapper::ParamMessage;
 
 
 /// Create an [`Editor`] instance using [iced](https://github.com/iced-rs/iced). The rough idea is

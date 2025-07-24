@@ -9,14 +9,14 @@ use std::sync::Arc;
 use futures::FutureExt;
 // TODO: find subscription module
 use iced::{
-    futures, subscription, Color, Task, Element, ParameterUpdate,
+    futures, Color, Task, Element, ParameterUpdate,
     Subscription,
 };
 
 use iced_baseview::futures::subscription;
 use iced_baseview::{window::{WindowQueue, WindowSubs}, Application};
 use baseview::WindowScalePolicy;
-use crate::test::lib1::IcedEditor;
+use crate::libplugui::IcedEditor;
 
 /// Wraps an `iced_baseview` [`Application`] around [`IcedEditor`]. Needed to allow editors to
 /// always receive a copy of the GUI context.
