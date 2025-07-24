@@ -71,7 +71,7 @@ pub trait IcedEditor: 'static + Send + Sync + Sized {
     /// See [`Application::Flags`].
     type InitializationFlags: 'static + Clone + Send + Sync;
 
-    /// See [`Application::new`]. This also receivs the GUI context in addition to the flags.
+    /// See [`Application::new`]. This also receives the GUI context in addition to the flags.
     fn new(
         initialization_fags: Self::InitializationFlags,
         context: Arc<dyn GuiContext>,

@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crossbeam::channel;
 use nih_plug::prelude::{GuiContext, ParamPtr};
@@ -9,11 +9,12 @@ use anyhow::Error;
 use dotenv::dotenv;
 use rfd::FileDialog;
 
-use iced_baseview::{window, window::WindowSubs, futures::Subscription, Element, Length, Task, Size, Application};
+use iced_baseview::{window::WindowSubs, futures::Subscription, Element, Length, Task, Size, Application};
 use iced_baseview::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
 use iced_baseview::core as iced;
 
-use crate::libplugui::{IcedEditor, ParameterUpdate};
+use crate::libplugui::{IcedEditor, ParamMessage, create_iced_editor, IcedState};
+use crate::AhmadParams;
 
 mod agent;
 
@@ -21,7 +22,7 @@ struct Agent;
 
 #[derive(Default)]
 struct UserTextEditor {
-    content: text_editor::Content
+    content: Arc<Mutex<text_editor::Content>>
 }
 
 #[derive(Default)]
@@ -37,10 +38,10 @@ struct AgentProgressBar {
 }
 
 #[derive(Default)]
-pub struct AhmadWrapperApplication<E: IcedEditor> {
+pub struct AhmadEditor {
     // plugin fields
-    editor: E,
-    parameter_updates_receiver: Arc<channel::Receiver<ParameterUpdate>>,
+    context: Arc<dyn GuiContext>,
+    params: Arc<AhmadParams>,
 
     // ui fields
     user: UserTextEditor,
@@ -49,8 +50,10 @@ pub struct AhmadWrapperApplication<E: IcedEditor> {
     errors: String,
 }
 
-pub enum Message<E: IcedEditor> {
-    EditorMessage(E::Message),
+#[derive(Debug, Clone, Default)]
+pub enum Message {
+    #[default]
+    Empty,
     Window(iced::window::Event),
     UserEdit(text_editor::Action),
     OutputPathFDSelected,
@@ -62,44 +65,29 @@ pub enum Message<E: IcedEditor> {
     ConnectionResult(String),
     Reset,
     AgentError(String),
-}
-
-impl<E: IcedEditor> std::fmt::Debug for Message<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            // FIX: fill this out
-            _ => write!(f, "Debug not implemented on this message yet"),
-        }
-    }
-}
-
-impl<E: IcedEditor> Clone for Message<E> {
-    fn clone(&self) -> Self {
-        match self {
-            // FIX: fill this out
-            _ => Self::Reset
-        }
-    }
+    // Add parameter message handling
+    Param(ParamMessage),
 }
 
 impl UserTextEditor {
     fn new() -> Self {
         Self {
-            content: text_editor::Content::new()
+            content: Arc::new(Mutex::new(text_editor::Content::new()))
         }
     }
 
     fn update(state: &mut Self, message: Message) {
         match message {
             Message::UserEdit(action) => {
-                state.content.perform(action);
+                state.content.lock().unwrap().perform(action);
             },
             _ => {}
         }
     }
 
     fn view(state: &Self) -> Element<'_, Message> {
-        text_editor(&state.content)
+        let content = state.content.lock().unwrap();
+        text_editor(&content)
             .placeholder(
                 "Ask for a riff, melody, or bassline with a specific instrument. Be sure to include descriptive adjectives and adjectives like 'high quality' or 'clear'."
             )
@@ -239,23 +227,20 @@ impl Agent {
     }
 }
 
-impl<E: IcedEditor> Application for AhmadWrapperApplication<E> {
-    type Message = Message<E>;
-    type Theme = iced_baseview::Theme;
+impl IcedEditor for AhmadEditor{
     type Executor = iced_baseview::executor::Default;
-    type Flags = (
-        Arc<dyn GuiContext>,
-        Arc<channel::Receiver<ParameterUpdate>>,
-        E::InitializationFlags,
-    );
+    type Message = Message;
+    type InitializationFlags = Arc<AhmadParams>; // Pass params as initialization flags
 
-    fn new( (context, parameter_updates_receiver, flags): Self::Flags,
+    fn new(
+        params: Self::InitializationFlags,
+        context: Arc<dyn GuiContext>,
     ) -> (Self, Task<Self::Message>) {
-        let (editor, task) = E::new(flags, context);
+        dotenv().ok();
         (
             Self {
-                editor,
-                parameter_updates_receiver,
+                context,
+                params,
                 user: UserTextEditor::new(),
                 out_path: AgentOutputContainer::new(),
                 progress: AgentProgressBar::new(),
@@ -265,60 +250,45 @@ impl<E: IcedEditor> Application for AhmadWrapperApplication<E> {
         )
     }
 
-    #[inline]
-    fn view(&self) -> Element<'_, Message<E>> {
-        column![
-            UserTextEditor::view(&self.user),
-            AgentOutputContainer::view(&self.out_path),
-            button("Check Connection").on_press(Message::CheckConnection),
-            button("Generate").on_press(Message::PromptSubmitted),
-            AgentProgressBar::view(&self.progress),
-            text(&self.errors[..]).size(20)
-        ]
-            .spacing(20)
-            .padding(20)
-            .into()
+    fn context(&self) -> &dyn GuiContext {
+        self.context.as_ref()
     }
 
-
     #[inline]
-    fn update(&mut self, message: Message<E>)  -> Task<Message<E>> {
+    fn update(
+        &mut self,
+        message: Self::Message,
+    ) -> Task<Self::Message> {
         match message {
             Message::Window(event) => {
-                // FIX: this needs to call GUI context and resize window
-                // match event {
-                //     iced::window::Event::Resized(_) => {
-                //         iced::window::RedrawRequest;
-                //         self.context.request_resize(); }
-                //     _ => {}
-                // }
-            }
+                // handle window events through context
+                // TODO: how can I get window event up to UI?
+                Task::none()
+            },
             Message::UserEdit(s) => {
                 nih_log!("user edited model prompt.");
                 UserTextEditor::update(&mut self.user, Message::UserEdit(s));
+                Task::none()
             },
             Message::OutputNameChanged(s) => {
                 nih_log!("user changed output filename: {}", s);
                 AgentOutputContainer::update(&mut self.out_path, Message::OutputNameChanged(s));
+                Task::none()
             },
             Message::OutputPathFDSelected => {
+                // FIX: take this out when data streaming works
                 nih_log!("opening folder select dialog...");
                 AgentOutputContainer::update(&mut self.out_path, Message::OutputPathFDSelected);
+                Task::none()
             }
             Message::AgentProgressUpdated(f) => {
                 nih_log!("agent progress updated to {}", f);
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(f));
+                Task::none()
             },
             Message::PromptSubmitted => {
                 self.errors.clear();
                 nih_log!("prompt submitted...");
-                // check for errors
-                // self.errors.clear();
-                // let Some(_) = self.out_path.content.to_str() else {
-                //     self.errors.push_str("Error: no output filepath defined. Please define where
-                //                            you'd like the generated MIDI to go.\n");
-                //     return Task::none()
-                // };
 
                 // construct output filepath
                 let filepath: PathBuf = Path::new(self.out_path.filepath.as_str())
@@ -334,7 +304,7 @@ impl<E: IcedEditor> Application for AhmadWrapperApplication<E> {
 
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(0.0));
                 return Agent::request(
-                    self.user.content.text().to_owned(),
+                    self.user.content.lock().unwrap().text().to_owned(),
                     filepath
                 );
             },
@@ -343,15 +313,18 @@ impl<E: IcedEditor> Application for AhmadWrapperApplication<E> {
                 self.errors.clear();
                 let fmtstr = format!("Error generating response: {}", e);
                 self.errors.push_str(&fmtstr);
+                Task::none()
             },
             Message::ResponseComplete(user_msg) => {
                 self.errors.clear();
                 self.errors.push_str(&user_msg);
+                Task::none()
             },
             Message::Reset => {
                 self.errors.clear();
                 self.user = UserTextEditor::new();
                 self.out_path = AgentOutputContainer::new();
+                Task::none()
             },
             Message::CheckConnection => {
                 self.errors.clear();
@@ -360,90 +333,47 @@ impl<E: IcedEditor> Application for AhmadWrapperApplication<E> {
             Message::ConnectionResult(s) => {
                 self.errors.clear();
                 self.errors.push_str(&s[..]);
+                Task::none()
             },
-            Message::Empty => {}
-        }
-        Task::none()
-    }
-
-    #[inline]
-    fn subscription(
-        &self,
-        window_subs: &mut WindowSubs<Self::Message>,
-    ) -> Subscription<Self::Message> {
-        // Since we're wrapping around `E::Message`, we need to do this transformation ourselves
-        let mut editor_window_subs = WindowSubs {
-            on_frame: match &window_subs.on_frame {
-                Some(Message::EditorMessage(message)) => Some(message.clone()),
-                _ => None,
+            Message::Param(param_message) => {
+                // Handle parameter messages using the trait method
+                self.handle_param_message(param_message);
+                Task::none()
             },
-            on_window_will_close: match &window_subs.on_window_will_close {
-                Some(Message::EditorMessage(message)) => Some(message.clone()),
-                _ => None,
+            Message::Empty => {
+                Task::none()
             },
-        };
-
-        let subscription = Subscription::batch([
-            // For some reason there's no adapter to just convert `futures::channel::mpsc::Receiver`
-            // into a stream that doesn't require consuming that receiver (which wouldn't work in
-            // this case since the subscriptions function gets called repeatedly). So we'll just use
-            // a crossbeam queue and this unfold instead.
-            subscription::unfold(
-                "parameter updates",
-                self.parameter_updates_receiver.clone(),
-                |parameter_updates_receiver| match parameter_updates_receiver.try_recv() {
-                    Ok(_) => futures::future::ready((
-                        Some(Message::ParameterUpdate),
-                        parameter_updates_receiver,
-                    ))
-                    .boxed(),
-                    Err(_) => futures::future::pending().boxed(),
-                },
-            ),
-            self.editor
-                .subscription(&mut editor_window_subs)
-                .map(Message::EditorMessage),
-        ]);
-
-        if let Some(message) = editor_window_subs.on_frame {
-            window_subs.on_frame = Some(Message::EditorMessage(message));
-        }
-        if let Some(message) = editor_window_subs.on_window_will_close {
-            window_subs.on_window_will_close = Some(Message::EditorMessage(message));
-        }
-
-        subscription
-    }
-
-    #[inline]
-    fn theme(&self) -> Self::Theme {
-        iced::Theme::Dark
-    }
-
-    #[inline]
-    fn title(&self) -> String {
-        String::from(env!("CARGO_PKG_NAME"))
-    }
-
-    #[inline]
-    fn style(&self, theme: &Self::Theme) -> iced_baseview::Appearance {
-        iced_baseview::Appearance {
-            background_color: theme.palette().background,
-            text_color: theme.palette().text,
         }
     }
 
+    fn view(&self) -> Element<Self::Message> {
+        column![
+            UserTextEditor::view(&self.user),
+            AgentOutputContainer::view(&self.out_path),
+            button("Check Connection").on_press(Message::CheckConnection),
+            button("Generate").on_press(Message::PromptSubmitted),
+            AgentProgressBar::view(&self.progress),
+            text(&self.errors[..]).size(20)
+        ]
+            .spacing(20)
+            .padding(20)
+            .into()
+    }
+    fn subscription(&self, _window_subs: &mut WindowSubs<Self::Message>) -> Subscription<Self::Message> {
+        // TODO: add window event subscription? Does this even need to be handled here?
+        // Maybe put this in the application wrapper?
+        Subscription::none()
+    }
 }
 
+pub fn create(params: Arc<AhmadParams>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
+    create_iced_editor::<AhmadEditor>(
+        params.editor_state.clone(),
+        params,
+    )
+}
 
-#[derive(Debug, Clone, Copy)]
-pub enum ParamMessage {
-    /// Begin an automation gesture for a parameter.
-    BeginSetParameter(ParamPtr),
-    /// Set a parameter to a new normalized value. This needs to be surrounded by a matching
-    /// `BeginSetParameter` and `EndSetParameter`.
-    SetParameterNormalized(ParamPtr, f32),
-    /// End an automation gesture for a parameter.
-    EndSetParameter(ParamPtr),
+pub fn default_state() -> Arc<IcedState> {
+    IcedState::from_size(800, 800)
 }
 

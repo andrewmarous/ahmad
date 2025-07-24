@@ -16,6 +16,7 @@ use std::{
 };
 
 use crate::{AhmadParams};
+use crate::libplugui::{IcedState, create_iced_editor};
 
 pub mod ui;
 mod agent;
@@ -581,31 +582,21 @@ impl Editor for AhmadEditor {
     fn spawn(
             &self,
             parent: ParentWindowHandle,
-            // context is for all communication with host (parameters, window)
             context: Arc<dyn GuiContext>,
         ) -> Box<dyn std::any::Any + Send> {
 
-        let size: (u32, u32) = self.params.editor_state.size();
+        // Use the libplugui create_iced_editor function
+        let editor = create_iced_editor::<ui::UIState>(
+            self.params.editor_state.clone(),
+            context, // Pass context as initialization flags
+        ).expect("Failed to create iced editor");
 
-        let settings = Settings {
-            window: WindowOpenOptions {
-                title: String::from("ahmad"),
-                size: iced_baseview::baseview::Size::new(size.0 as f64, size.1 as f64),
-                scale: WindowScalePolicy::SystemScaleFactor,
-            },
-            ..Default::default()
-        };
-
-        // TODO: add message passing from window to plugin process via channel in Flags
-        let handle = iced_baseview::open_parented::<ui::UIState, ParentWindowHandle>(
-            &parent,
-            UIFlags { context },
-            settings
-        );
-
+        // The editor is already wrapped, so we just need to spawn it
+        let handle = editor.spawn(parent, context);
+        
         self.params.editor_state.open.store(true, Ordering::Release);
 
-        Box::new(IcedWindowHandle {handle, state: AhmadEditorState::from_size(size)})
+        Box::new(IcedWindowHandle {handle, state: AhmadEditorState::from_size(self.params.editor_state.size())})
     }
 
     fn size(&self) -> (u32, u32) {
@@ -623,9 +614,15 @@ impl Editor for AhmadEditor {
         true
     }
 
-    fn param_value_changed(&self, _id: &str, _normalized_value: f32) {}
+    fn param_value_changed(&self, _id: &str, _normalized_value: f32) {
+        // Parameter updates are handled by the libplugui wrapper
+    }
 
-    fn param_values_changed(&self) {}
+    fn param_values_changed(&self) {
+        // Parameter updates are handled by the libplugui wrapper
+    }
 
-    fn param_modulation_changed(&self, _id: &str, _modulation_offset: f32) {}
+    fn param_modulation_changed(&self, _id: &str, _modulation_offset: f32) {
+        // Parameter updates are handled by the libplugui wrapper
+    }
 }

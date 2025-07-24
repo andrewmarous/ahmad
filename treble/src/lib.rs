@@ -7,10 +7,10 @@ use std::{
 use directories::ProjectDirs;
 use nih_plug::prelude::*;
 
-use crate::editor::IcedState;
+use crate::libplugui::{IcedState, create_iced_editor};
 
 mod libplugui;
-mod ui;
+mod editor;
 
 static INIT_FILES: Once = Once::new();
 

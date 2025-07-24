@@ -1,5 +1,6 @@
 use std::{fs, path::PathBuf, sync::{Arc, Once}};
 use crossbeam::atomic::AtomicCell;
+use crossbeam::channel;
 use directories::ProjectDirs;
 
 use nih_plug::prelude::*;
@@ -49,6 +50,7 @@ struct AhmadParams {
 impl Default for Ahmad {
     fn default() -> Self {
         nih_log!("Initializing plugin...");
+        
         Self {
             params: Arc::new(AhmadParams::default()),
         }
