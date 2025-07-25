@@ -11,7 +11,7 @@ use rfd::FileDialog;
 
 use iced_baseview::{window::WindowSubs, futures::Subscription, Element, Length, Task, Size, Application};
 use iced_baseview::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
-use iced_baseview::core as iced;
+use iced_baseview::{core as iced, executor};
 
 use crate::libplugui::{IcedEditor, ParamMessage, create_iced_editor, IcedState};
 use crate::AhmadParams;
@@ -112,26 +112,7 @@ impl AgentOutputContainer {
     }
 
     fn view(state: &Self) -> Element<'_, Message> {
-        container(
-            column![
-                text("Output path:").size(10),
-                row![
-                    button(&state.filepath[..])
-                        .on_press(Message::OutputPathFDSelected)
-                        .width(Length::FillPortion(3)),
-                    text(&state.separator_text).size(20),
-                    text_input("example.midi or example.wav", &state.filename[..])
-                        .on_input(Message::OutputNameChanged)
-                        .width(Length::FillPortion(1))
-                ]
-                    .spacing(10)
-                    .padding(20)
-            ]
-                .padding(10)
-        )
-            .align_left(Length::Shrink)
-            .style(container::rounded_box)
-            .into()
+        text("Agent placeholder...").into()
     }
 
     fn update(state: &mut Self, message: Message) {
@@ -242,7 +223,6 @@ impl IcedEditor for AhmadEditor {
         params: Self::InitializationFlags,
         context: Arc<dyn GuiContext>,
     ) -> (Self, Task<Self::Message>) {
-        dotenv().ok();
         (
             Self {
                 context,
@@ -368,12 +348,14 @@ impl IcedEditor for AhmadEditor {
     fn subscription(&self, _window_subs: &mut WindowSubs<Self::Message>) -> Subscription<Self::Message> {
         // TODO: add window event subscription? Does this even need to be handled here?
         // Maybe put this in the application wrapper?
+
         Subscription::none()
     }
 }
 
 pub fn create(params: Arc<AhmadParams>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
-    create_iced_editor::<AhmadEditor>(
+    nih_log!("Creating editor...");
+    create_iced_editor::<AhmadEditor> (
         params.editor_state.clone(),
         params,
     )
@@ -382,4 +364,56 @@ pub fn create(params: Arc<AhmadParams>) -> Option<Box<dyn nih_plug::prelude::Edi
 pub fn default_state() -> Arc<IcedState> {
     IcedState::from_size(800, 400)
 }
+
+// struct TestEditor {
+//     context: Arc<dyn GuiContext>,
+//     test: i32,
+// }
+
+// #[derive(Debug, Clone)]
+// enum TestMessage {
+//     Message
+// }
+
+// impl IcedEditor for TestEditor {
+//     type Executor = iced_baseview::executor::Default;
+//     type Message = TestMessage;
+//     type InitializationFlags = Arc<AhmadParams>; // Pass params as initialization flags
+
+//     fn new(
+//         params: Self::InitializationFlags,
+//         context: Arc<dyn GuiContext>,
+//     ) -> (Self, Task<Self::Message>) {
+//         (
+//             Self {
+//                 context,
+//                 test: 0
+//             },
+//             Task::none()
+//         )
+//     }
+
+//     fn context(&self) -> &dyn GuiContext {
+//         self.context.as_ref()
+//     }
+
+//     #[inline]
+//     fn update(
+//         &mut self,
+//         message: Self::Message,
+//     ) -> Task<Self::Message> {
+//         match message {
+//             TestMessage::Message => Task::none(),
+//         }
+//     }
+
+//     fn view(&self) -> Element<Self::Message> {
+//         button("Test123").into()
+//     }
+//     fn subscription(&self, _window_subs: &mut WindowSubs<Self::Message>) -> Subscription<Self::Message> {
+//         // TODO: add window event subscription? Does this even need to be handled here?
+//         // Maybe put this in the application wrapper?
+//         Subscription::none()
+//     }
+// }
 

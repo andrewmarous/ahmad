@@ -29,7 +29,7 @@ iced_baseview = { git = "https://github.com/BillyDM/iced_baseview.git", default-
 raw-window-handle = "0.5"
 raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
 directories = "6.0.0"
-baseview = { git = "https://github.com/RustAudio/baseview?tab=MIT-2-ov-file" }
+objc = "0.2.7"
 
 [workspace]
 members = ["xtask"]

@@ -15,7 +15,6 @@ use iced::{
 
 use iced_baseview::futures::subscription;
 use iced_baseview::{window::{WindowQueue, WindowSubs}, Application};
-use baseview::WindowScalePolicy;
 use crate::libplugui::{IcedEditor, ParameterUpdate};
 
 /// Wraps an `iced_baseview` [`Application`] around [`IcedEditor`]. Needed to allow editors to

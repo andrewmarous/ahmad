@@ -1,7 +1,7 @@
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel;
 use nih_plug::params::persist::PersistentField;
-use nih_plug::prelude::{Editor, GuiContext};
+use nih_plug::prelude::{nih_log, Editor, GuiContext};
 use serde::{Deserialize, Serialize};
 // This doesn't need to be re-export but otherwise the compiler complains about
 // `hidden_glob_reexports`
@@ -40,6 +40,7 @@ pub fn create_iced_editor<E: IcedEditor>(
     // which parameter so we'd need to redraw the entire GUI either way.
     let (parameter_updates_sender, parameter_updates_receiver) = channel::bounded(1);
 
+    nih_log!("instantiating editor wrapper...");
     Some(Box::new(editor::IcedEditorWrapper::<E> {
         iced_state,
         initialization_flags,

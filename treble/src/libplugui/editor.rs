@@ -5,8 +5,11 @@ use iced_baseview::baseview::{WindowScalePolicy, WindowOpenOptions, Size};
 use iced_baseview::settings::{Settings, IcedBaseviewSettings};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::channel;
+use nih_plug::nih_log;
 use nih_plug::prelude::{Editor, GuiContext, ParentWindowHandle};
+use objc::runtime::Object;
 use raw_window_handle::{HandleError, HasRawWindowHandle, RawWindowHandle};
+use std::ffi::c_void;
 use std::num::{NonZeroIsize, NonZeroU32};
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering;
@@ -35,7 +38,8 @@ struct ParentWindowHandleAdapter(nih_plug::editor::ParentWindowHandle);
 
 unsafe impl HasRawWindowHandle for ParentWindowHandleAdapter {
     fn raw_window_handle(&self) -> RawWindowHandle {
-        match self.0 {
+        nih_log!("calling raw_window_handle...");
+        let res = match self.0 {
             ParentWindowHandle::X11Window(window) => {
                 let mut handle = raw_window_handle::XcbWindowHandle::empty();
                 handle.window = window;
@@ -51,7 +55,9 @@ unsafe impl HasRawWindowHandle for ParentWindowHandleAdapter {
                 handle.hwnd = hwnd;
                 RawWindowHandle::Win32(handle)
             }
-        }
+        };
+        nih_log!("window handle converted.");
+        res
     }
 }
 
@@ -66,6 +72,7 @@ impl<E: IcedEditor> Editor for IcedEditorWrapper<E> {
         parent: ParentWindowHandle,
         context: Arc<dyn GuiContext>,
     ) -> Box<dyn std::any::Any + Send> {
+        nih_log!("Spawning child window...");
         let (unscaled_width, unscaled_height) = self.iced_state.size();
         let scaling_factor = self.scaling_factor.load();
 
@@ -98,6 +105,8 @@ impl<E: IcedEditor> Editor for IcedEditorWrapper<E> {
                 ..Default::default()
             },
         );
+
+        nih_log!("Child window created. Storing state as 'open' and wrapping in a window handle...");
 
         self.iced_state.open.store(true, Ordering::Release);
         Box::new(IcedEditorHandle {
@@ -154,3 +163,4 @@ impl<Message: Send> Drop for IcedEditorHandle<Message> {
         self.window.close_window();
     }
 }
+
