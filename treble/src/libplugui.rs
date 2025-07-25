@@ -14,7 +14,6 @@ use iced::{
 
 mod editor;
 mod wrapper;
-mod ui;
 
 use iced_baseview::window::WindowSubs;
 

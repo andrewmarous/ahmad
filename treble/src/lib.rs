@@ -7,7 +7,7 @@ use std::{
 use directories::ProjectDirs;
 use nih_plug::prelude::*;
 
-use crate::libplugui::{IcedState, create_iced_editor};
+use crate::libplugui::{IcedState};
 
 mod libplugui;
 mod editor;
@@ -38,12 +38,12 @@ fn init_data_dir() -> PathBuf {
     dir.to_path_buf()
 }
 
-struct Ahmad {
+pub struct Ahmad {
     params: Arc<AhmadParams>,
 }
 
 #[derive(Params)]
-struct AhmadParams {
+pub struct AhmadParams {
     #[persist = "editor-state"]
     editor_state: Arc<IcedState>,
 }

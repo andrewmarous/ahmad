@@ -6,17 +6,17 @@ use crossbeam::channel;
 use nih_plug::prelude::{GuiContext, ParamPtr};
 use std::sync::Arc;
 
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 // TODO: find subscription module
 use iced::{
-    futures, Color, Task, Element, ParameterUpdate,
+    futures, Color, Task, Element,
     Subscription,
 };
 
 use iced_baseview::futures::subscription;
 use iced_baseview::{window::{WindowQueue, WindowSubs}, Application};
 use baseview::WindowScalePolicy;
-use crate::libplugui::IcedEditor;
+use crate::libplugui::{IcedEditor, ParameterUpdate};
 
 /// Wraps an `iced_baseview` [`Application`] around [`IcedEditor`]. Needed to allow editors to
 /// always receive a copy of the GUI context.
@@ -101,47 +101,64 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
     ) -> Subscription<Self::Message> {
         // Since we're wrapping around `E::Message`, we need to do this transformation ourselves
         let mut editor_window_subs = WindowSubs {
-            on_frame: match window_subs.on_frame {
+            on_frame: match window_subs.on_frame.clone() {
                 Some(cb) => {
                     if let Some(Message::EditorMessage(msg)) = cb() {
-                        Some(Arc::new(|| {Some(msg.clone())}))
+                        Some(Arc::new(move || { Some(msg.clone()) }))
                     } else { None }
                 },
                 _ => None
             },
-            on_window_will_close: match window_subs.on_window_will_close {
+            on_window_will_close: match window_subs.on_window_will_close.clone() {
                 Some(cb) => {
                     if let Some(Message::EditorMessage(msg)) = cb() {
-                        Some(Arc::new(|| {Some(msg.clone())}))
+                        Some(Arc::new(move || {Some(msg.clone())}))
                     } else { None }
                 },
                 _ => None
             },
         };
 
-        let parameter_updates = futures::stream::unfold(
-            self.parameter_updates_receiver.clone(),
-            |receiver| async move {
-                // Try to receive a message without blocking
-                match receiver.try_recv() {
-                    Ok(_) => (Some(Message::ParameterUpdate), receiver),
-                    Err(_) => (None, receiver),
-                }
-            },
+        // turn stream receiver into
+
+        // let parameter_updates = futures::stream::unfold(
+        //     self.parameter_updates_receiver.clone(),
+        //     |receiver| async move {
+        //         // Try to receive a message without blocking
+        //         match receiver.try_recv() {
+        //             Ok(_) => Some((Message::ParameterUpdate, receiver)),
+        //             Err(_) => None,
+        //         }
+        //     },
+        // ).into_(
+        //         |msg| futures::future::ready(match msg {
+        //             Some()
+        //         })
+        //     );
+
+        // TODO: does this work correctly?
+        let subscription = Subscription::batch(
+            self.parameter_updates_receiver
+                .clone()
+                .iter()
+                .map(
+                |_| {
+                        self.editor
+                            .subscription(&mut editor_window_subs)
+                            .map(Message::EditorMessage)
+                    }
+            ),
         );
 
-        let subscription = Subscription::batch([
-            parameter_updates,
-            self.editor
-                .subscription(&mut editor_window_subs)
-                .map(Message::EditorMessage),
-        ]);
-
-        if let Some(message) = editor_window_subs.on_frame {
-            window_subs.on_frame = Some(Arc::new(|| {Some(Message::EditorMessage(message))}));
+        if let Some(sub) = editor_window_subs.on_frame {
+            if let Some(message) = sub() {
+                window_subs.on_frame = Some(Arc::new(move || { Some(Message::EditorMessage(message.clone())) }));
+            } else { window_subs.on_frame = None; }
         }
-        if let Some(message) = editor_window_subs.on_window_will_close {
-            window_subs.on_window_will_close = Some(Arc::new(|| {Some(Message::EditorMessage(message))}));
+        if let Some(sub) = editor_window_subs.on_window_will_close {
+            if let Some(message) = sub() {
+                window_subs.on_window_will_close = Some(Arc::new(move || { Some(Message::EditorMessage(message.clone())) }));
+            } else { window_subs.on_window_will_close = None; }
         }
 
         subscription
