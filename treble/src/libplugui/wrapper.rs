@@ -101,43 +101,47 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
     ) -> Subscription<Self::Message> {
         // Since we're wrapping around `E::Message`, we need to do this transformation ourselves
         let mut editor_window_subs = WindowSubs {
-            on_frame: match &window_subs.on_frame {
-                Some(Message::EditorMessage(message)) => Some(message.clone()),
-                _ => None,
+            on_frame: match window_subs.on_frame {
+                Some(cb) => {
+                    if let Some(Message::EditorMessage(msg)) = cb() {
+                        Some(Arc::new(|| {Some(msg.clone())}))
+                    } else { None }
+                },
+                _ => None
             },
-            on_window_will_close: match &window_subs.on_window_will_close {
-                Some(Message::EditorMessage(message)) => Some(message.clone()),
-                _ => None,
+            on_window_will_close: match window_subs.on_window_will_close {
+                Some(cb) => {
+                    if let Some(Message::EditorMessage(msg)) = cb() {
+                        Some(Arc::new(|| {Some(msg.clone())}))
+                    } else { None }
+                },
+                _ => None
             },
         };
 
+        let parameter_updates = futures::stream::unfold(
+            self.parameter_updates_receiver.clone(),
+            |receiver| async move {
+                // Try to receive a message without blocking
+                match receiver.try_recv() {
+                    Ok(_) => (Some(Message::ParameterUpdate), receiver),
+                    Err(_) => (None, receiver),
+                }
+            },
+        );
+
         let subscription = Subscription::batch([
-            // For some reason there's no adapter to just convert `futures::channel::mpsc::Receiver`
-            // into a stream that doesn't require consuming that receiver (which wouldn't work in
-            // this case since the subscriptions function gets called repeatedly). So we'll just use
-            // a crossbeam queue and this unfold instead.
-            subscription::unfold(
-                "parameter updates",
-                self.parameter_updates_receiver.clone(),
-                |parameter_updates_receiver| match parameter_updates_receiver.try_recv() {
-                    Ok(_) => futures::future::ready((
-                        Some(Message::ParameterUpdate),
-                        parameter_updates_receiver,
-                    ))
-                    .boxed(),
-                    Err(_) => futures::future::pending().boxed(),
-                },
-            ),
+            parameter_updates,
             self.editor
                 .subscription(&mut editor_window_subs)
                 .map(Message::EditorMessage),
         ]);
 
         if let Some(message) = editor_window_subs.on_frame {
-            window_subs.on_frame = Some(Message::EditorMessage(message));
+            window_subs.on_frame = Some(Arc::new(|| {Some(Message::EditorMessage(message))}));
         }
         if let Some(message) = editor_window_subs.on_window_will_close {
-            window_subs.on_window_will_close = Some(Message::EditorMessage(message));
+            window_subs.on_window_will_close = Some(Arc::new(|| {Some(Message::EditorMessage(message))}));
         }
 
         subscription
