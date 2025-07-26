@@ -354,7 +354,6 @@ impl IcedEditor for AhmadEditor {
 }
 
 pub fn create(params: Arc<AhmadParams>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
-    nih_log!("Creating editor...");
     create_iced_editor::<AhmadEditor> (
         params.editor_state.clone(),
         params,

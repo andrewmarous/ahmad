@@ -38,7 +38,6 @@ struct ParentWindowHandleAdapter(nih_plug::editor::ParentWindowHandle);
 
 unsafe impl HasRawWindowHandle for ParentWindowHandleAdapter {
     fn raw_window_handle(&self) -> RawWindowHandle {
-        nih_log!("calling raw_window_handle...");
         let res = match self.0 {
             ParentWindowHandle::X11Window(window) => {
                 let mut handle = raw_window_handle::XcbWindowHandle::empty();
@@ -56,7 +55,6 @@ unsafe impl HasRawWindowHandle for ParentWindowHandleAdapter {
                 RawWindowHandle::Win32(handle)
             }
         };
-        nih_log!("window handle converted.");
         res
     }
 }
@@ -76,8 +74,11 @@ impl<E: IcedEditor> Editor for IcedEditorWrapper<E> {
         let (unscaled_width, unscaled_height) = self.iced_state.size();
         let scaling_factor = self.scaling_factor.load();
 
+        nih_log!("Window size: {}x{}, scaling: {:?}", unscaled_width, unscaled_height, scaling_factor);
+
         // TODO: iced_baseview does not have gracefuly error handling for context creation failures.
         //       This will panic if the context could not be created.
+        nih_log!("About to call iced_baseview::open_parented...");
         let window = iced_baseview::open_parented::<wrapper::IcedEditorWrapperApplication<E>, ParentWindowHandleAdapter>(
             &ParentWindowHandleAdapter(parent),
             // editor needs GUI context

@@ -50,7 +50,6 @@ pub struct AhmadParams {
 
 impl Default for Ahmad {
     fn default() -> Self {
-        nih_log!("Initializing plugin...");
         Self {
             params: Arc::new(AhmadParams::default()),
         }
@@ -138,3 +137,4 @@ impl Vst3Plugin for Ahmad {
 // add logging and steinberg API safety
 
 nih_export_vst3!(Ahmad);
+

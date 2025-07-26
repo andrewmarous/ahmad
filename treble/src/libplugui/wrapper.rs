@@ -118,36 +118,12 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
             },
         };
 
-        // turn stream receiver into
-
-        // let parameter_updates = futures::stream::unfold(
-        //     self.parameter_updates_receiver.clone(),
-        //     |receiver| async move {
-        //         // Try to receive a message without blocking
-        //         match receiver.try_recv() {
-        //             Ok(_) => Some((Message::ParameterUpdate, receiver)),
-        //             Err(_) => None,
-        //         }
-        //     },
-        // ).into_(
-        //         |msg| futures::future::ready(match msg {
-        //             Some()
-        //         })
-        //     );
-
-        // TODO: does this work correctly?
-        let subscription = Subscription::batch(
-            self.parameter_updates_receiver
-                .clone()
-                .iter()
-                .map(
-                |_| {
-                        self.editor
-                            .subscription(&mut editor_window_subs)
-                            .map(Message::EditorMessage)
-                    }
-            ),
-        );
+        // For now, just use the editor subscription to avoid the blocking issue
+        // The parameter updates will be handled through the update method instead
+        // FIX: make this parameter update subscription work asynchronously
+        let editor_subscription = self.editor
+            .subscription(&mut editor_window_subs)
+            .map(Message::EditorMessage);
 
         if let Some(sub) = editor_window_subs.on_frame {
             if let Some(message) = sub() {
@@ -160,7 +136,7 @@ impl<E: IcedEditor> Application for IcedEditorWrapperApplication<E> {
             } else { window_subs.on_window_will_close = None; }
         }
 
-        subscription
+        editor_subscription
     }
 
     #[inline]

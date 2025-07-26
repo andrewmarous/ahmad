@@ -40,7 +40,7 @@ pub fn create_iced_editor<E: IcedEditor>(
     // which parameter so we'd need to redraw the entire GUI either way.
     let (parameter_updates_sender, parameter_updates_receiver) = channel::bounded(1);
 
-    nih_log!("instantiating editor wrapper...");
+    assert!(AtomicCell::<f32>::is_lock_free());
     Some(Box::new(editor::IcedEditorWrapper::<E> {
         iced_state,
         initialization_flags,
