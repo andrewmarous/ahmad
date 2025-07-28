@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 futures = "0.3.31"
-iced = "0.13.1"
+iced = { version = "0.13.1", default-features = true, features = ["smol"] }
 iced_futures = "0.13.2"
 magic = "0.16.2"
 anyhow = "1.0.98"

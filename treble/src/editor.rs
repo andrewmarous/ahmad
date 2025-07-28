@@ -12,6 +12,7 @@ use dotenv::dotenv;
 use num_enum::TryFromPrimitive;
 use rfd::FileDialog;
 
+use iced_baseview::futures::backend::native::smol::time::every;
 use iced_baseview::{window::WindowSubs, futures::Subscription, Element, Length, Task, Size, Application};
 use iced_baseview::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
 use iced_baseview::{core as iced, executor};
@@ -53,6 +54,8 @@ pub struct AhmadEditor {
     out_path: AgentOutputContainer,
     progress: AgentProgressBar,
     errors: String,
+    width: f32,
+    height: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -236,6 +239,7 @@ impl IcedEditor for AhmadEditor {
         params: Self::InitializationFlags,
         context: Arc<dyn GuiContext>,
     ) -> (Self, Task<Self::Message>) {
+        let (w, h) = params.0.editor_state.size();
         (
             Self {
                 context,
@@ -245,6 +249,8 @@ impl IcedEditor for AhmadEditor {
                 out_path: AgentOutputContainer::new(),
                 progress: AgentProgressBar::new(),
                 errors: String::from("No errors yet. Happy trails!\n"),
+                width: w as f32,
+                height: h as f32,
             },
             Task::none()
         )
@@ -259,14 +265,17 @@ impl IcedEditor for AhmadEditor {
         &mut self,
         message: Self::Message,
     ) -> Task<Self::Message> {
+
         match message {
             Message::WindowResized => {
                 let (w, h) = self.params.editor_state.size();
                 nih_log!("ui resizing window to {}x{}", w, h);
-                iced_baseview::window::resize(Size {
-                    width: w as f32,
-                    height: h as f32,
-                })
+                // iced_baseview::window::resize(Size {
+                //     width: w as f32,
+                //     height: h as f32,
+                // })
+                self.width = w as f32; self.height = h as f32;
+                Task::none()
             },
             Message::UserEdit(s) => {
                 nih_log!("user edited model prompt.");
@@ -363,15 +372,26 @@ impl IcedEditor for AhmadEditor {
         ]
             .spacing(20)
             .padding(20)
+            .width(Length::Fixed(self.width - 20.0))
+            .height(Length::Fixed(self.height - 20.0))
             .into()
+
     }
     fn subscription(&self, _window_subs: &mut WindowSubs<Self::Message>) -> Subscription<Self::Message> {
         // TODO: add window event subscription? Does this even need to be handled here?
         // Maybe put this in the application wrapper?
-        //
-        iced_baseview::window::resize_events().map(|_| {
-            Message::WindowResized
-        })
+        let (w, h) = self.params.editor_state.size();
+        let sw = self.width;
+        let sh = self.height;
+        every(iced::time::Duration::from_millis(200))
+            .map(move |_| {
+                let (w, h) = (w as f32, h as f32);
+                if w != sw || h != sh {
+                    Message::WindowResized
+                } else {
+                    Message::Empty
+                }
+            })
     }
 }
 
