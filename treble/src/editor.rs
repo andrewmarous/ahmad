@@ -1,12 +1,15 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicU8;
+use std::sync::{Arc, Mutex, atomic::Ordering};
 
-use crossbeam::channel;
+use bytes::Bytes;
+use crossbeam::channel::{self, Sender};
 use nih_plug::prelude::{GuiContext, ParamPtr};
 use nih_plug::{nih_error, nih_log, wrapper};
 
 use anyhow::Error;
 use dotenv::dotenv;
+use num_enum::TryFromPrimitive;
 use rfd::FileDialog;
 
 use iced_baseview::{window::WindowSubs, futures::Subscription, Element, Length, Task, Size, Application};
@@ -14,11 +17,13 @@ use iced_baseview::widget::{button, column, container, progress_bar, row, text, 
 use iced_baseview::{core as iced, executor};
 
 use crate::libplugui::{IcedEditor, ParamMessage, create_iced_editor, IcedState};
-use crate::AhmadParams;
+use crate::{AhmadParams, ResponseFiletype};
 
 mod agent;
 
-struct Agent;
+struct Agent {
+    sender: Arc<Sender<Result<Bytes, Error>>>
+}
 
 #[derive(Default)]
 struct UserTextInput {
@@ -44,6 +49,7 @@ pub struct AhmadEditor {
 
     // ui fields
     user: UserTextInput,
+    agent: Agent,
     out_path: AgentOutputContainer,
     progress: AgentProgressBar,
     errors: String,
@@ -53,8 +59,8 @@ pub struct AhmadEditor {
 pub enum Message {
     #[default]
     Empty,
-    Window(iced::window::Event),
     UserEdit(String),
+    WindowResized,
     // UserEdit(text_editor::Action),
     OutputPathFDSelected,
     OutputNameChanged(String),
@@ -169,10 +175,16 @@ impl AgentProgressBar {
 // }
 
 impl Agent {
+    pub fn new(sender: Arc<Sender<Result<Bytes, Error>>>) -> Self {
+        Self {
+           sender
+        }
+    }
 
+    // TODO: move this to AhmadEditor
     pub fn reset() -> Task<Message> { Task::done(Message::Reset) }
 
-    pub fn check_connection() -> Task<Message> {
+    pub fn check_connection(&self) -> Task<Message> {
         Task::run(
             agent::check_backend(),
             move |res | match res {
@@ -189,11 +201,12 @@ impl Agent {
         )
     }
 
-    pub fn request(prompt: String, filepath: PathBuf) -> Task<Message> {
+    pub fn request(&self, prompt: String, filetype: ResponseFiletype) -> Task<Message> {
         Task::run(
             agent::request_response_stream(
                 prompt.clone(),
-                filepath.clone()
+                self.sender.clone(),
+                filetype,
             ),
             move |res| match res {
                 Ok(s) => {
@@ -217,7 +230,7 @@ impl Agent {
 impl IcedEditor for AhmadEditor {
     type Executor = iced_baseview::executor::Default;
     type Message = Message;
-    type InitializationFlags = Arc<AhmadParams>; // Pass params as initialization flags
+    type InitializationFlags = (Arc<AhmadParams>, Arc<Sender<Result<Bytes, Error>>>); // Pass params as initialization flags
 
     fn new(
         params: Self::InitializationFlags,
@@ -226,8 +239,9 @@ impl IcedEditor for AhmadEditor {
         (
             Self {
                 context,
-                params,
+                params: params.0,
                 user: UserTextInput::new(),
+                agent: Agent::new(params.1),
                 out_path: AgentOutputContainer::new(),
                 progress: AgentProgressBar::new(),
                 errors: String::from("No errors yet. Happy trails!\n"),
@@ -246,10 +260,13 @@ impl IcedEditor for AhmadEditor {
         message: Self::Message,
     ) -> Task<Self::Message> {
         match message {
-            Message::Window(event) => {
-                // handle window events through context
-                // TODO: how can I get window event up to UI?
-                Task::none()
+            Message::WindowResized => {
+                let (w, h) = self.params.editor_state.size();
+                nih_log!("ui resizing window to {}x{}", w, h);
+                iced_baseview::window::resize(Size {
+                    width: w as f32,
+                    height: h as f32,
+                })
             },
             Message::UserEdit(s) => {
                 nih_log!("user edited model prompt.");
@@ -289,9 +306,12 @@ impl IcedEditor for AhmadEditor {
                 }
 
                 AgentProgressBar::update(&mut self.progress, Message::AgentProgressUpdated(0.0));
-                return Agent::request(
+                // request is initiated and handled with an Iced Task
+                return self.agent.request(
                     self.user.content.clone(),
-                    filepath
+                    ResponseFiletype::try_from_primitive(
+                        self.params.filetype.load(Ordering::Relaxed))
+                        .expect("filetype should be a valid enum variant")
                 );
             },
             Message::AgentError(e) => {
@@ -314,7 +334,7 @@ impl IcedEditor for AhmadEditor {
             },
             Message::CheckConnection => {
                 self.errors.clear();
-                return Agent::check_connection();
+                return self.agent.check_connection();
             },
             Message::ConnectionResult(s) => {
                 self.errors.clear();
@@ -348,15 +368,17 @@ impl IcedEditor for AhmadEditor {
     fn subscription(&self, _window_subs: &mut WindowSubs<Self::Message>) -> Subscription<Self::Message> {
         // TODO: add window event subscription? Does this even need to be handled here?
         // Maybe put this in the application wrapper?
-
-        Subscription::none()
+        //
+        iced_baseview::window::resize_events().map(|_| {
+            Message::WindowResized
+        })
     }
 }
 
-pub fn create(params: Arc<AhmadParams>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
+pub fn create(params: Arc<AhmadParams>, tx: Arc<Sender<Result<Bytes, Error>>>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
     create_iced_editor::<AhmadEditor> (
         params.editor_state.clone(),
-        params,
+        (params, tx),
     )
 }
 

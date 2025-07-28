@@ -1,9 +1,11 @@
 use std::{
-    sync::{Arc, Once},
-    path::PathBuf,
-    fs,
+    fs, path::PathBuf, sync::{atomic::AtomicU8, Arc, Once}
 };
 
+use num_enum::TryFromPrimitive;
+use bytes::Bytes;
+use anyhow::Error;
+use crossbeam::channel;
 use directories::ProjectDirs;
 use nih_plug::prelude::*;
 
@@ -40,18 +42,32 @@ fn init_data_dir() -> PathBuf {
 
 pub struct Ahmad {
     params: Arc<AhmadParams>,
+
+    agent_stream: Arc<channel::Receiver<Result<Bytes, Error>>>
 }
 
 #[derive(Params)]
 pub struct AhmadParams {
     #[persist = "editor-state"]
     editor_state: Arc<IcedState>,
+
+    #[persist = "filetype"]
+    filetype: Arc<AtomicU8>
+}
+
+#[derive(Debug, TryFromPrimitive)]
+#[repr(u8)]
+pub enum ResponseFiletype {
+    Wav = 0,
+    Midi = 1,
 }
 
 impl Default for Ahmad {
     fn default() -> Self {
+        let (_, stream) = channel::unbounded::<Result<Bytes, Error>>();
         Self {
             params: Arc::new(AhmadParams::default()),
+            agent_stream: Arc::new(stream)
         }
     }
 }
@@ -60,9 +76,11 @@ impl Default for AhmadParams {
     fn default() -> Self {
         Self {
             editor_state: editor::default_state(),
+            filetype: Arc::new(AtomicU8::new(ResponseFiletype::Wav as u8)),
         }
     }
 }
+
 
 impl Plugin for Ahmad {
     const NAME: &'static str = "ahmad";
@@ -95,8 +113,13 @@ impl Plugin for Ahmad {
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        // TODO: create channel, pass sender down to agent
+
+        let (tx, rx) = channel::unbounded::<Result<Bytes, Error>>();
+        self.agent_stream = Arc::new(rx);
         editor::create(
-            self.params.clone()
+            self.params.clone(),
+            Arc::new(tx)
         )
     }
 
@@ -117,11 +140,19 @@ impl Plugin for Ahmad {
             _aux: &mut AuxiliaryBuffers,
             _context: &mut impl ProcessContext<Self>,
         ) -> ProcessStatus {
-        for _channel_samples in buffer.iter_samples() {
+        for channel_samples in buffer.iter_samples() {
             // do some audio processing
 
             if self.params.editor_state.is_open() {
                 // do some processing only when window is open
+                if !self.agent_stream.is_empty() {
+                    // NOTE: have to use the try methods in relatime thread
+                    while let Ok(item) = self.agent_stream.try_recv() {
+                        // TODO: talk to maccoy and ask how a DAW
+                        // processes audio samples
+                    }
+
+                }
             }
         }
 

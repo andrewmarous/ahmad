@@ -30,6 +30,9 @@ raw-window-handle = "0.5"
 raw-window-handle-06 = { package = "raw-window-handle", version = "0.6" }
 directories = "6.0.0"
 objc = "0.2.7"
+bytes = "1.10.1"
+num_enum = "0.7.4"
+rtrb = "0.3.2"
 
 [workspace]
 members = ["xtask"]
