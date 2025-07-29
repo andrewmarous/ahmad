@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex, atomic::Ordering};
 
 use bytes::Bytes;
 use crossbeam::channel::{self, Sender};
+use futures::Stream;
+use ::iced::stream::try_channel;
 use nih_plug::prelude::{GuiContext, ParamPtr};
 use nih_plug::{nih_error, nih_log, wrapper};
 
@@ -18,12 +20,19 @@ use iced_baseview::widget::{button, column, container, progress_bar, row, text, 
 use iced_baseview::{core as iced, executor};
 
 use crate::libplugui::{IcedEditor, ParamMessage, create_iced_editor, IcedState};
-use crate::{AhmadParams, ResponseFiletype};
+use crate::{AhmadParams, ResponseFiletype, WavMetadata};
 
 mod agent;
+mod utils;
+
+pub enum TaskResponse {
+    Bytes(Bytes),
+    String(String),
+    Progress(f32),
+}
 
 struct Agent {
-    sender: Arc<Sender<Result<Bytes, Error>>>
+    sender: Arc<Sender<Bytes>>
 }
 
 #[derive(Default)]
@@ -64,6 +73,7 @@ pub enum Message {
     Empty,
     UserEdit(String),
     WindowResized,
+    HeaderReceived(Bytes),
     // UserEdit(text_editor::Action),
     OutputPathFDSelected,
     OutputNameChanged(String),
@@ -178,7 +188,7 @@ impl AgentProgressBar {
 // }
 
 impl Agent {
-    pub fn new(sender: Arc<Sender<Result<Bytes, Error>>>) -> Self {
+    pub fn new(sender: Arc<Sender<Bytes>>) -> Self {
         Self {
            sender
         }
@@ -212,19 +222,43 @@ impl Agent {
                 filetype,
             ),
             move |res| match res {
-                Ok(s) => {
-                    if let Ok(pct) = s.parse() {
-                        Message::AgentProgressUpdated(pct)
-                    } else {
-                        let size: usize = s.parse().unwrap();
-                        Message::ResponseComplete(String::from(
-                            format!("Model response received, file is {} bytes", size)
-                        ))
-                    }
-                }
+                Ok(r) => match r {
+                    TaskResponse::String(s) => Message::AgentError(s),
+                    TaskResponse::Progress(f) => Message::AgentProgressUpdated(f),
+                    TaskResponse::Bytes(header) => Message::HeaderReceived(header),
+                },
                 Err(e) => {
+                    nih_error!("Error requesting model response: {}", e);
                     Message::AgentError(e.to_string())
                 }
+            }
+        )
+    }
+
+    pub fn build_filetype_metadata(metadata: Arc<Mutex<>>, header: Bytes) -> impl Stream<Item = Result<(), Error>>{
+        // FIX: make this two separate things for wav vs. midi
+        try_channel(
+            1, move |_| async move {
+                match ResponseFiletype::try_from_primitive(editor.params.filetype.load(Ordering::Relaxed))
+                    .expect("Response filetype is not valid") {
+                    ResponseFiletype::Wav => {
+                        let mut meta = match editor.params.wav_metadata.lock() {
+                            Ok(mg) => mg,
+                            Err(e) => return Err(Error::new(std::fmt::Error {})),
+                        }.as_mut();
+
+                        meta = Some(&mut WavMetadata {
+                            num_channels: header[23..24].iter().fold(0u8, |a, b| {a + b}) as usize,
+                            sample_rate: header[25..28].iter().fold(0u8, |a, b| {a + b}) as u32,
+                            data_size: header[41..44].iter().fold(0u8, |a, b| {a + b}) as usize,
+                        });
+                    },
+                    ResponseFiletype::Midi => {
+                        // TODO: implement for MIDI
+                    }
+                }
+
+                Ok(())
             }
         )
     }
@@ -233,7 +267,7 @@ impl Agent {
 impl IcedEditor for AhmadEditor {
     type Executor = iced_baseview::executor::Default;
     type Message = Message;
-    type InitializationFlags = (Arc<AhmadParams>, Arc<Sender<Result<Bytes, Error>>>); // Pass params as initialization flags
+    type InitializationFlags = (Arc<AhmadParams>, Arc<Sender<Bytes>>); // Pass params as initialization flags
 
     fn new(
         params: Self::InitializationFlags,
@@ -323,6 +357,17 @@ impl IcedEditor for AhmadEditor {
                         .expect("filetype should be a valid enum variant")
                 );
             },
+            Message::HeaderReceived(header) => {
+                nih_log!("Processing stream header...");
+                let metadata = self.params.wav_metadata.clone();
+                Task::run(
+                    Agent::build_filetype_metadata(metadata, header),
+                    move |res| match res {
+                        Ok(_) => Message::Empty,
+                        Err(e) => Message::AgentError(e.to_string())
+                    }
+                )
+            }
             Message::AgentError(e) => {
                 nih_error!("Error with agent: {e}");
                 self.errors.clear();
@@ -395,7 +440,7 @@ impl IcedEditor for AhmadEditor {
     }
 }
 
-pub fn create(params: Arc<AhmadParams>, tx: Arc<Sender<Result<Bytes, Error>>>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
+pub fn create(params: Arc<AhmadParams>, tx: Arc<Sender<Bytes>>) -> Option<Box<dyn nih_plug::prelude::Editor>> {
     create_iced_editor::<AhmadEditor> (
         params.editor_state.clone(),
         (params, tx),

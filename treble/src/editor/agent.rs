@@ -19,7 +19,7 @@ use std::{
     fs, net::TcpStream, path::PathBuf
 };
 
-use crate::ResponseFiletype;
+use crate::{ResponseFiletype, editor::TaskResponse};
 
 #[derive(Debug, Serialize)]
 struct GenerationPayload<'a> {
@@ -51,12 +51,12 @@ pub fn check_backend() -> impl Stream<Item= Result<(), Error>> {
 
 pub fn request_response_stream(
     prompt: String,
-    bytestream: Arc<Sender<Result<Bytes, Error>>>,
+    bytestream: Arc<Sender<Bytes>>,
     filetype: ResponseFiletype,
-) -> impl Stream<Item= Result<String, Error>> {
+) -> impl Stream<Item= Result<TaskResponse, Error>> {
     try_channel(
         1, move |mut sender| async move {
-            sender.send(String::from("33.0")).await?;
+            sender.send(TaskResponse::Progress(33.0)).await?;
 
             let client = Client::new();
             let extension = match filetype {
@@ -69,7 +69,7 @@ pub fn request_response_stream(
                 filetype: extension,
             };
             nih_log!("built request payload.");
-            sender.send(String::from("66.0")).await?;
+            sender.send(TaskResponse::Progress(66.0)).await?;
 
             let response = client
                 .post(api_url("/generate").expect("Given endpoint is invalid."))
@@ -78,14 +78,22 @@ pub fn request_response_stream(
                 .await?;
 
             nih_log!("received generate request.");
-            sender.send(String::from("99.0")).await?;
+            sender.send(TaskResponse::Progress(99.0)).await?;
 
             let mut bytes = response.bytes_stream();
+            let Some(Ok(header)) = bytes.next().await else {
+                nih_error!("error receiving response: stream is empty");
+                // FIX: this error type
+                return Err(Error::new(tokio::time::error::Error::shutdown()))
+            };
+
+            sender.send(TaskResponse::Bytes(header)).await?;
+
+            // parse header
             while let Some(item)= bytes.next().await {
+                let payload = item?;
                 bytestream.try_send(
-                    item.map_err(|err| {
-                        anyhow!(err)
-                    })
+                    payload
                 )?;
             }
 
@@ -94,10 +102,6 @@ pub fn request_response_stream(
             nih_log!("response bytes received");
 
             nih_log!("response data successfully received.");
-            sender.send(String::from(
-                format!("{}", -1)
-            )).await?;
-
             Ok(())
         }
     )

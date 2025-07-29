@@ -41,12 +41,19 @@ fn init_data_dir() -> PathBuf {
     dir.to_path_buf()
 }
 
+pub struct WavMetadata {
+    num_channels: usize,
+    sample_rate: u32,
+    data_size: usize,
+}
+
+pub struct MidiMetadata {
+    // TODO: fill this out
+}
+
 pub struct Ahmad {
     params: Arc<AhmadParams>,
-    agent_stream: Arc<channel::Receiver<Result<Bytes, Error>>>,
-
-    // audio output fields
-    is_playing: bool,
+    agent_stream: Arc<channel::Receiver<Bytes>>,
 }
 
 #[derive(Params)]
@@ -56,6 +63,9 @@ pub struct AhmadParams {
 
     #[persist = "filetype"]
     filetype: Arc<AtomicU8>,
+
+    wav_metadata: Arc<Mutex<Option<WavMetadata>>>,
+    midi_metadata: Arc<Mutex<Option<MidiMetadata>>>,
 }
 
 #[derive(Debug, TryFromPrimitive)]
@@ -74,11 +84,10 @@ pub enum BufferType {
 
 impl Default for Ahmad {
     fn default() -> Self {
-        let (_, stream) = channel::unbounded::<Result<Bytes, Error>>();
+        let (_, stream) = channel::unbounded::<Bytes>();
         Self {
             params: Arc::new(AhmadParams::default()),
             agent_stream: Arc::new(stream),
-            is_playing: false,
         }
     }
 }
@@ -88,6 +97,8 @@ impl Default for AhmadParams {
         Self {
             editor_state: editor::default_state(),
             filetype: Arc::new(AtomicU8::new(ResponseFiletype::Wav as u8)),
+            wav_metadata: Arc::new(Mutex::new(None)),
+            midi_metadata: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -122,23 +133,18 @@ impl Ahmad {
             ).expect("Response filetype not valid."),
             ResponseFiletype::Wav
         ));
+
         let mut buf = vec![0.0; 2048];
         let mut buf_pos = 0usize;
+
         while let Ok(item) = self.agent_stream.try_recv() {
-            match item {
-                Ok(chunk) => {
-                    let samples = self.process_wav_chunk(&chunk);
-                    for sample in samples {
-                        buf[buf_pos] = sample;
-                        buf_pos = (buf_pos + 1) % buf.len()
-                    }
-                }
-                Err(e) => {
-                    nih_error!("Error receiving response bytes on plugin layer: {}", e);
-                    return (Vec::new(), 0usize);
-                }
+            let samples = self.process_wav_chunk(&item);
+            for sample in samples {
+                buf[buf_pos] = sample;
+                buf_pos = (buf_pos + 1) % buf.len()
             }
         }
+
         (buf, buf_pos)
     }
 
@@ -192,7 +198,7 @@ impl Plugin for Ahmad {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         // TODO: create channel, pass sender down to agent
 
-        let (tx, rx) = channel::unbounded::<Result<Bytes, Error>>();
+        let (tx, rx) = channel::unbounded::<Bytes>();
         self.agent_stream = Arc::new(rx);
         editor::create(
             self.params.clone(),
@@ -217,14 +223,16 @@ impl Plugin for Ahmad {
             _aux: &mut AuxiliaryBuffers,
             _context: &mut impl ProcessContext<Self>,
         ) -> ProcessStatus {
+        if self.agent_stream.is_empty() { return ProcessStatus::Normal; }
 
         let filetype = ResponseFiletype::try_from_primitive(
             self.params.filetype.load(Ordering::Relaxed)
         )
             .expect("Response filetype is not valid.");
-
         match filetype {
             ResponseFiletype::Wav => {
+                // only processing PCM data here, file metadata has already
+                // been populated by GUI thread in params
                 let (gen_buffer, mut gen_buffer_pos) = self.get_wav_buffer();
                 for mut channel_samples in buffer.iter_samples() {
                     for (channel, sample) in channel_samples.iter_mut().enumerate() {
