@@ -167,7 +167,6 @@ impl AgentProgressBar {
 // }
 
 impl Agent {
-
     pub fn reset() -> Task<Message> { Task::done(Message::Reset) }
 
     pub fn check_connection() -> Task<Message> {
