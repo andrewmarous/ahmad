@@ -1,5 +1,5 @@
 use std::{
-    fs, path::PathBuf, sync::{atomic::AtomicU8, Arc, Once}
+    fs, path::PathBuf, sync::{atomic::{AtomicU8, Ordering}, Arc, Mutex, Once}
 };
 
 use num_enum::TryFromPrimitive;
@@ -15,6 +15,7 @@ mod libplugui;
 mod editor;
 
 static INIT_FILES: Once = Once::new();
+type SysEx = ();
 
 fn init_metadata() {
     INIT_FILES.call_once( || {
@@ -42,8 +43,10 @@ fn init_data_dir() -> PathBuf {
 
 pub struct Ahmad {
     params: Arc<AhmadParams>,
+    agent_stream: Arc<channel::Receiver<Result<Bytes, Error>>>,
 
-    agent_stream: Arc<channel::Receiver<Result<Bytes, Error>>>
+    // audio output fields
+    is_playing: bool,
 }
 
 #[derive(Params)]
@@ -52,7 +55,7 @@ pub struct AhmadParams {
     editor_state: Arc<IcedState>,
 
     #[persist = "filetype"]
-    filetype: Arc<AtomicU8>
+    filetype: Arc<AtomicU8>,
 }
 
 #[derive(Debug, TryFromPrimitive)]
@@ -62,12 +65,20 @@ pub enum ResponseFiletype {
     Midi = 1,
 }
 
+#[derive(Debug)]
+pub enum BufferType {
+    Wav(Vec<f32>),
+    Midi(Vec<NoteEvent<SysEx>>),
+    Empty,
+}
+
 impl Default for Ahmad {
     fn default() -> Self {
         let (_, stream) = channel::unbounded::<Result<Bytes, Error>>();
         Self {
             params: Arc::new(AhmadParams::default()),
-            agent_stream: Arc::new(stream)
+            agent_stream: Arc::new(stream),
+            is_playing: false,
         }
     }
 }
@@ -78,6 +89,72 @@ impl Default for AhmadParams {
             editor_state: editor::default_state(),
             filetype: Arc::new(AtomicU8::new(ResponseFiletype::Wav as u8)),
         }
+    }
+}
+
+impl Ahmad {
+    fn process_wav_chunk(&mut self, bytes: &Bytes) -> Vec<f32> {
+            bytes
+            .chunks_exact(2)
+            .map(|chunk| {
+                let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+                sample as f32 / 32768.0 // TODO: confirm this
+            })
+            .collect()
+    }
+
+    fn process_midi_chunk(&mut self, bytes: &Bytes) -> Vec<nih_plug::midi::NoteEvent<SysEx>> {
+        // TODO: find midi library to process events in a stream
+        // if none exist, do these things in order:
+        //  1. Block stream until entire file is received, then construct file and read as normal
+        //  2. Write library to process MIDI file in chunks
+
+        Vec::new()
+    }
+
+    /// returns a Vec<f32> containing the currently-available chunks of `self.agent_stream`.
+    /// This is meant to be wrapped in a BufferType with BufferType::from() if generic handling is
+    /// needed.
+    fn get_wav_buffer(&mut self) -> (Vec<f32>, usize) {
+        assert!(matches!(
+            ResponseFiletype::try_from_primitive(
+                self.params.filetype.load(Ordering::Relaxed)
+            ).expect("Response filetype not valid."),
+            ResponseFiletype::Wav
+        ));
+        let mut buf = vec![0.0; 2048];
+        let mut buf_pos = 0usize;
+        while let Ok(item) = self.agent_stream.try_recv() {
+            match item {
+                Ok(chunk) => {
+                    let samples = self.process_wav_chunk(&chunk);
+                    for sample in samples {
+                        buf[buf_pos] = sample;
+                        buf_pos = (buf_pos + 1) % buf.len()
+                    }
+                }
+                Err(e) => {
+                    nih_error!("Error receiving response bytes on plugin layer: {}", e);
+                    return (Vec::new(), 0usize);
+                }
+            }
+        }
+        (buf, buf_pos)
+    }
+
+    fn get_midi_buffer(&mut self) -> Vec<NoteEvent<SysEx>> {
+        assert!(matches!(
+            ResponseFiletype::try_from_primitive(
+                self.params.filetype.load(Ordering::Relaxed)
+            ).expect("Response filetype not valid."),
+            ResponseFiletype::Wav
+        ));
+
+        let buf: Vec<NoteEvent<SysEx>> = Vec::new();
+
+        // TODO: process MIDI stream
+
+        buf
     }
 }
 
@@ -105,7 +182,7 @@ impl Plugin for Ahmad {
 
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
-    type SysExMessage = ();
+    type SysExMessage = SysEx;
     type BackgroundTask = ();
 
     fn params(&self) -> Arc<dyn Params> {
@@ -140,19 +217,43 @@ impl Plugin for Ahmad {
             _aux: &mut AuxiliaryBuffers,
             _context: &mut impl ProcessContext<Self>,
         ) -> ProcessStatus {
-        for channel_samples in buffer.iter_samples() {
-            // do some audio processing
 
+        let filetype = ResponseFiletype::try_from_primitive(
+            self.params.filetype.load(Ordering::Relaxed)
+        )
+            .expect("Response filetype is not valid.");
+
+        match filetype {
+            ResponseFiletype::Wav => {
+                let (gen_buffer, mut gen_buffer_pos) = self.get_wav_buffer();
+                for mut channel_samples in buffer.iter_samples() {
+                    for (channel, sample) in channel_samples.iter_mut().enumerate() {
+                        // TODO: ensure this is right
+                        let gen_sample = if gen_buffer_pos < gen_buffer.len() {
+                            gen_buffer[gen_buffer_pos]
+                        } else { 0.0 };
+
+                        *sample = gen_sample;
+
+                        if channel == 0 {
+                            gen_buffer_pos = (gen_buffer_pos + 1) % gen_buffer.len();
+                        }
+                    }
+                }
+            },
+            ResponseFiletype::Midi => {
+                let gen_buffer = self.get_midi_buffer();
+
+                panic!("MIDI files not implemented yet.")
+
+                // TODO:
+            }
+        }
+        // add audio to real buffer
+
+        for mut channel_samples in buffer.iter_samples() {
             if self.params.editor_state.is_open() {
                 // do some processing only when window is open
-                if !self.agent_stream.is_empty() {
-                    // NOTE: have to use the try methods in relatime thread
-                    while let Ok(item) = self.agent_stream.try_recv() {
-                        // TODO: talk to maccoy and ask how a DAW
-                        // processes audio samples
-                    }
-
-                }
             }
         }
 
