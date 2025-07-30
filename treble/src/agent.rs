@@ -34,7 +34,7 @@ struct GenerationResponse {
 }
 
 fn api_url(endpoint: &str) -> Result<Url, Error> {
-    let mut url_base: String = env::var("API_URL").expect("API_URL must be defined");
+    let mut url_base: String = String::from(env!("API_URL"));
     url_base.push_str(endpoint);
     match Url::parse(&url_base) {
         Err(e) => Err(Error::new(e)),
