@@ -9,6 +9,8 @@ use ::iced::stream::try_channel;
 use nih_plug::prelude::{GuiContext, ParamPtr};
 use nih_plug::{nih_error, nih_log, wrapper};
 
+
+use tokio::runtime::Builder;
 use anyhow::Error;
 use dotenv::dotenv;
 use num_enum::TryFromPrimitive;
@@ -33,6 +35,7 @@ pub enum TaskResponse {
 
 struct Agent {
     sender: Arc<Sender<Bytes>>
+    runtime: Arc<tokio::runtime::Runtime>,
 }
 
 #[derive(Default)]
@@ -190,7 +193,11 @@ impl AgentProgressBar {
 impl Agent {
     pub fn new(sender: Arc<Sender<Bytes>>) -> Self {
         Self {
-           sender
+            sender,
+            runtime: Arc::new(Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build Tokio runtime"))
         }
     }
 
@@ -220,6 +227,7 @@ impl Agent {
                 prompt.clone(),
                 self.sender.clone(),
                 filetype,
+                self.runtime.clone()
             ),
             move |res| match res {
                 Ok(r) => match r {
@@ -354,7 +362,7 @@ impl IcedEditor for AhmadEditor {
                     self.user.content.clone(),
                     ResponseFiletype::try_from_primitive(
                         self.params.filetype.load(Ordering::Relaxed))
-                        .expect("filetype should be a valid enum variant")
+                        .expect("filetype should be a valid enum variant"),
                 );
             },
             Message::HeaderReceived(header) => {

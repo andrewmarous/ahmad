@@ -1,3 +1,5 @@
+use std::net::ToSocketAddrs;
+use std::time::Duration;
 use std::{env, sync::Arc};
 
 use bytes::Bytes;
@@ -25,12 +27,13 @@ use crate::{ResponseFiletype, editor::TaskResponse};
 struct GenerationPayload<'a> {
     prompt: &'a str,
     negative_prompt: &'a str,
-    #[serde(rename = "client_output_path")]
+    #[serde(rename = "output_filetype")]
     filetype: &'a str,
 }
 
 fn api_url(endpoint: &str) -> Result<Url, Error> {
     let mut url_base: String = env::var("API_URL").expect("API_URL must be defined");
+    nih_log!("{}", url_base);
     url_base.push_str(endpoint);
     match Url::parse(&url_base) {
         Err(e) => Err(Error::new(e)),
@@ -42,8 +45,10 @@ pub fn check_backend() -> impl Stream<Item= Result<(), Error>> {
     nih_log!("checking backend connection...");
     let port: u16 = 8000;
     let url: String = env::var("API_URL").expect("API_URL must be defined");
+    let host = (url, port).to_socket_addrs().unwrap().next().unwrap();
+    let timeout = Duration::from_secs(3);
     let port_check = async move {
-        TcpStream::connect((url, port))?;
+        TcpStream::connect_timeout(&host, timeout)?;
         Ok(())
     };
     futures::stream::once(port_check)
@@ -53,6 +58,7 @@ pub fn request_response_stream(
     prompt: String,
     bytestream: Arc<Sender<Bytes>>,
     filetype: ResponseFiletype,
+    runtime: Arc<tokio::runtime::Runtime>,
 ) -> impl Stream<Item= Result<TaskResponse, Error>> {
     try_channel(
         1, move |mut sender| async move {
@@ -71,11 +77,13 @@ pub fn request_response_stream(
             nih_log!("built request payload.");
             sender.send(TaskResponse::Progress(66.0)).await?;
 
-            let response = client
-                .post(api_url("/generate").expect("Given endpoint is invalid."))
-                .json(&payload)
-                .send()
-                .await?;
+            let response = runtime.block_on(async {
+                client.post(api_url("/generate").expect("Given endpoint is invalid."))
+                    .json(&payload)
+                    .send()
+                    .await
+            })?;
+            let response = response.error_for_status()?;
 
             nih_log!("received generate request.");
             sender.send(TaskResponse::Progress(99.0)).await?;
