@@ -6,11 +6,17 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use dotenv::dotenv;
 use rfd::FileDialog;
+use tokio;
 
 use iced::{Element, Length, Task};
 use iced::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
 
 mod agent;
+
+pub enum TaskResponse {
+    String(String),
+    Progress(f32),
+}
 
 struct Agent;
 
@@ -193,15 +199,9 @@ impl Agent {
                 filepath.clone()
             ),
             move |res| match res {
-                Ok(s) => {
-                    if let Ok(pct) = s.parse() {
-                        Message::AgentProgressUpdated(pct)
-                    } else {
-                        let size: usize = s.parse().unwrap();
-                        Message::ResponseComplete(String::from(
-                            format!("Model response received, file is {} bytes", size)
-                        ))
-                    }
+                Ok(tr) => match tr {
+                    TaskResponse::Progress(pct) => Message::AgentProgressUpdated(pct),
+                    TaskResponse::String(s) => Message::AgentError(s),
                 }
                 Err(e) => {
                     Message::AgentError(e.to_string())
@@ -283,7 +283,7 @@ impl App {
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(0.0));
                 Agent::request(
                     state.user.content.text().to_owned(),
-                    filepath
+                    filepath,
                 )
             },
             Message::AgentError(e) => {
@@ -331,7 +331,8 @@ impl App {
     // }
 }
 
-pub fn main() -> iced::Result {
+#[tokio::main]
+pub async fn main() -> iced::Result {
     dotenv().ok();
     let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
