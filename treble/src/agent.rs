@@ -2,10 +2,9 @@ use futures::StreamExt;
 use iced_futures::stream::try_channel;
 use futures::{stream::Stream, SinkExt};
 use reqwest::{
-    Client,
-    header::{HeaderMap, HeaderName, HeaderValue, CONNECTION},
+    header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONNECTION, CONTENT_TYPE}, Client
 };
-use tracing::info;
+use tracing::{info, error};
 use url::Url;
 use tokio::io::{self, AsyncWriteExt};
 use tokio::fs::File;
@@ -24,8 +23,13 @@ use std::{
 use crate::TaskResponse;
 
 #[derive(Debug, Serialize)]
+struct RunpodBody<'a> {
+    input: RunpodRequest<'a>,
+}
+
+#[derive(Debug, Serialize)]
 struct RunpodRequest<'a> {
-    endpoint: &'a str,
+    route: &'a str,
     payload: Payload<'a>
 }
 
@@ -93,14 +97,10 @@ pub fn request_response_stream(
             let client = Client::new();
             let headers = {
                 let mut res = HeaderMap::new();
-                let k = "keep-alive";
                 let key = format!("Bearer {}", env!("RUNPOD_API_KEY"));
-                res.append(CONNECTION, HeaderValue::from_static(k));
-                res.append(HeaderName::from_static(k), HeaderValue::from_static("timeout=300, max=50"));
-                res.append(
-                    HeaderName::from_static("Authorization"),
-                    HeaderValue::from_str(&key[..]).expect("Format of API key is invalid."),
-                );
+                res.append(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                res.append(CONNECTION, HeaderValue::from_static("keep-alive"));
+                res.append(AUTHORIZATION, HeaderValue::from_str(&key).expect("Format of API key is invalid."));
                 res
             };
             let Some(filetype) = output_path.extension() else {
@@ -109,35 +109,46 @@ pub fn request_response_stream(
                         .midi or .wav"))).await?;
                 return Ok(());
             };
-            let payload = RunpodRequest {
-                endpoint: "generate",
-                payload: Payload::Generate(GenerationPayload {
-                    prompt: &prompt[..],
-                    negative_prompt: "Low or medium quality",
-                    filetype: &filetype.to_str().unwrap()
-                })
-            };
+            let payload = RunpodBody {
+                input: RunpodRequest {
+                    route: "generate",
+                    payload: Payload::Generate(
+                        GenerationPayload {
+                            prompt: &prompt[..],
+                            negative_prompt: "Low or medium quality",
+                            filetype: &filetype.to_str().unwrap()
+                        }
+                    )
+            }};
             info!("built request payload.");
             sender.send(TaskResponse::Progress(66.0)).await?;
 
-            let response = client.post(api_url("/run").expect("Given endpoint is invalid."))
+            let response = client.post(api_url("").expect("Given endpoint is invalid."))
                 .headers(headers)
                 .json(&payload)
                 .send()
                 .await?;
 
+
+            let text = response.text().await?;
+            let response = match serde_json::from_str::<GenerationResponse>(&text) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    error!("Error deserializing response. Raw response text: {}", &text);
+                    return Err(Error::new(e));
+                }
+            };
+            let bytes: Bytes = response.file_data.into_bytes().into();
+
             info!("received generate request.");
             sender.send(TaskResponse::Progress(99.0)).await?;
 
             info!("building file...");
-            let response = response.json::<GenerationResponse>().await?;
-            let bytes: Bytes = response.file_data.into_bytes().into();
-
-
+            let len = bytes.len();
             fs::write(output_path, bytes)?;
             info!("response file successfully built.");
             sender.send(TaskResponse::String(String::from(
-                format!("{}", bytes.len())
+                format!("{}", len)
             ))).await?;
 
             Ok(())
