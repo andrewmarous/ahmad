@@ -11,10 +11,6 @@ pub struct NoteEvent {
     pub pitch_bends: Option<Vec<i16>>,
 }
 
-fn output_notes_to_polyphonic(preds: InferenceResult, ) -> Vec<NoteEvent> {
-    Vec::new()
-}
-
 // TODO: make this consistent with Basic Pitch's ONNX output format (this was taken from
 // basicpitch.cpp and needs to be made consistent with custom implementation)
 #[derive(Clone, Debug)]
@@ -24,14 +20,32 @@ pub struct InferenceResult {
     contours: Array2<i64>,
 }
 
+fn output_notes_to_polyphonic(
+    preds: &InferenceResult,
+    use_melodia_trick: bool,
+    include_pitch_bends: bool
+) -> Vec<NoteEvent> {
+    Vec::new()
+}
+
+fn drop_overlapping_pitch_bends(note_events: &mut Vec<NoteEvent>) -> () {
+
+}
+
+fn note_events_to_midi(
+    note_events: Vec<NoteEvent>,
+    n_times_notes: usize,
+) -> Bytes {
+    Bytes::new()
+}
+
 pub fn convert_to_midi(
     preds: InferenceResult,
     use_melodia_trick: bool,
     include_pitch_bends: bool
 ) -> Bytes {
-
-    let note_events: Vec<NoteEvent> = output_notes_to_polyphonic(
-        preds,
+    let mut note_events: Vec<NoteEvent> = output_notes_to_polyphonic(
+        &preds,
         use_melodia_trick,
         include_pitch_bends
     );
