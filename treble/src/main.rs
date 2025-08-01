@@ -1,15 +1,16 @@
+use dirs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Error;
-use tracing::{info, error};
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::fmt::writer::MakeWriterExt;
 use dotenv::dotenv;
 use rfd::FileDialog;
 use tokio;
+use tracing::{error, info};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-use iced::{Element, Length, Task};
 use iced::widget::{button, column, container, progress_bar, row, text, text_editor, text_input};
+use iced::{Element, Length, Task};
 
 mod agent;
 
@@ -22,7 +23,7 @@ struct Agent;
 
 #[derive(Default)]
 struct UserTextEditor {
-    content: text_editor::Content
+    content: text_editor::Content,
 }
 
 #[derive(Default)]
@@ -34,7 +35,7 @@ struct AgentOutputContainer {
 
 #[derive(Default)]
 struct AgentProgressBar {
-    progress: f32
+    progress: f32,
 }
 
 #[derive(Default)]
@@ -64,7 +65,7 @@ enum Message {
 impl UserTextEditor {
     fn new() -> Self {
         Self {
-            content: text_editor::Content::new()
+            content: text_editor::Content::new(),
         }
     }
 
@@ -72,7 +73,7 @@ impl UserTextEditor {
         match message {
             Message::UserEdit(action) => {
                 state.content.perform(action);
-            },
+            }
             _ => {}
         }
     }
@@ -109,14 +110,14 @@ impl AgentOutputContainer {
                         .on_input(Message::OutputNameChanged)
                         .width(Length::FillPortion(1))
                 ]
-                    .spacing(10)
-                    .padding(20)
+                .spacing(10)
+                .padding(20)
             ]
-                .padding(10)
+            .padding(10),
         )
-            .align_left(Length::Shrink)
-            .style(container::rounded_box)
-            .into()
+        .align_left(Length::Shrink)
+        .style(container::rounded_box)
+        .into()
     }
 
     fn update(state: &mut Self, message: Message) {
@@ -124,15 +125,14 @@ impl AgentOutputContainer {
             Message::OutputPathFDSelected => {
                 // init RFD session, pull value from that and assign to state.filepath
                 let filepath = FileDialog::new()
-                    .set_directory(
-                        std::env::current_dir().unwrap().as_path())
+                    .set_directory(std::env::current_dir().unwrap().as_path())
                     .pick_folder()
                     .expect("Error: rfd's pick_folder failed??");
                 state.filepath = String::from(filepath.to_str().unwrap())
-            },
+            }
             Message::OutputNameChanged(s) => {
                 state.filename = String::from(s);
-            },
+            }
             _ => {}
         }
     }
@@ -140,9 +140,7 @@ impl AgentOutputContainer {
 
 impl AgentProgressBar {
     fn new() -> Self {
-        Self {
-            progress: 0.0
-        }
+        Self { progress: 0.0 }
     }
 
     fn view(state: &Self) -> Element<'_, Message> {
@@ -153,10 +151,10 @@ impl AgentProgressBar {
         match message {
             Message::PromptSubmitted => {
                 state.progress = 0.0;
-            },
+            }
             Message::AgentProgressUpdated(pct) => {
                 state.progress = pct;
-            },
+            }
             _ => {}
         }
     }
@@ -173,40 +171,32 @@ impl AgentProgressBar {
 // }
 
 impl Agent {
-    pub fn reset() -> Task<Message> { Task::done(Message::Reset) }
+    pub fn reset() -> Task<Message> {
+        Task::done(Message::Reset)
+    }
 
     pub fn check_connection() -> Task<Message> {
-        Task::run(
-            agent::check_backend(),
-            move |res | match res {
-                Ok(_) => {
-                    Message::ConnectionResult(
-                        String::from("Connection to AI backend is successful!")
-                    )
-                },
-                Err(e) => {
-                    error!("Error checking connection to backend: {e}");
-                    Message::ConnectionResult(e.to_string())
-                }
+        Task::run(agent::check_backend(), move |res| match res {
+            Ok(_) => {
+                Message::ConnectionResult(String::from("Connection to AI backend is successful!"))
             }
-        )
+            Err(e) => {
+                error!("Error checking connection to backend: {e}");
+                Message::ConnectionResult(e.to_string())
+            }
+        })
     }
 
     pub fn request(prompt: String, filepath: PathBuf) -> Task<Message> {
         Task::run(
-            agent::request_response_stream(
-                prompt.clone(),
-                filepath.clone()
-            ),
+            agent::request_response_stream(prompt.clone(), filepath.clone()),
             move |res| match res {
                 Ok(tr) => match tr {
                     TaskResponse::Progress(pct) => Message::AgentProgressUpdated(pct),
                     TaskResponse::String(s) => Message::AgentError(s),
-                }
-                Err(e) => {
-                    Message::AgentError(e.to_string())
-                }
-            }
+                },
+                Err(e) => Message::AgentError(e.to_string()),
+            },
         )
     }
 }
@@ -230,23 +220,23 @@ impl App {
             AgentProgressBar::view(&state.progress),
             text(&state.errors[..]).size(20)
         ]
-            .spacing(20)
-            .padding(20)
-            .into()
+        .spacing(20)
+        .padding(20)
+        .into()
     }
 
-    fn update(state: &mut Self, message: Message)  -> Task<Message> {
+    fn update(state: &mut Self, message: Message) -> Task<Message> {
         match message {
             Message::UserEdit(s) => {
                 info!("user edited model prompt.");
                 UserTextEditor::update(&mut state.user, Message::UserEdit(s));
                 Task::none()
-            },
+            }
             Message::OutputNameChanged(s) => {
                 info!("user changed output filename: {}", s);
                 AgentOutputContainer::update(&mut state.out_path, Message::OutputNameChanged(s));
                 Task::none()
-            },
+            }
             Message::OutputPathFDSelected => {
                 info!("opening folder select dialog...");
                 AgentOutputContainer::update(&mut state.out_path, Message::OutputPathFDSelected);
@@ -256,7 +246,7 @@ impl App {
                 info!("agent progress updated to {}", f);
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(f));
                 Task::none()
-            },
+            }
             Message::PromptSubmitted => {
                 state.errors.clear();
                 info!("prompt submitted...");
@@ -281,39 +271,36 @@ impl App {
                 }
 
                 AgentProgressBar::update(&mut state.progress, Message::AgentProgressUpdated(0.0));
-                Agent::request(
-                    state.user.content.text().to_owned(),
-                    filepath,
-                )
-            },
+                Agent::request(state.user.content.text().to_owned(), filepath)
+            }
             Message::AgentError(e) => {
                 error!("Error with agent: {e}");
                 state.errors.clear();
                 let fmtstr = format!("Error generating response: {}", e);
                 state.errors.push_str(&fmtstr);
                 Task::none()
-            },
+            }
             Message::ResponseComplete(user_msg) => {
                 state.errors.clear();
                 state.errors.push_str(&user_msg);
                 Task::none()
-            },
+            }
             Message::Reset => {
                 state.errors.clear();
                 state.user = UserTextEditor::new();
                 state.out_path = AgentOutputContainer::new();
                 Task::none()
-            },
+            }
             Message::CheckConnection => {
                 state.errors.clear();
                 Agent::check_connection()
-            },
+            }
             Message::ConnectionResult(s) => {
                 state.errors.clear();
                 state.errors.push_str(&s[..]);
                 Task::none()
-            },
-            Message::Empty => { Task::none() }
+            }
+            Message::Empty => Task::none(),
         }
     }
 
@@ -331,17 +318,30 @@ impl App {
     // }
 }
 
-#[tokio::main]
-pub async fn main() -> iced::Result {
-    dotenv().ok();
-    let file_appender: RollingFileAppender = tracing_appender::rolling::daily("logs", "plugin.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
+    let mut log_dir = dirs::home_dir().expect("no home directory?");
+    log_dir.push("Library");
+    log_dir.push("Logs");
+    log_dir.push("com.Andrew Marous.muse");
+    std::fs::create_dir_all(&log_dir).expect("failed to create logging directory");
+
+    let file_appender: RollingFileAppender =
+        tracing_appender::rolling::daily(log_dir, "ahmad_treble.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_writer(non_blocking)
         .init();
 
+    guard
+}
+
+#[tokio::main]
+pub async fn main() -> iced::Result {
+    dotenv().ok();
+    let _guard = init_logging();
+
     info!("Starting UI...");
     iced::application("ahmad 0.1a.0", App::update, App::view)
-        .run_with( || (App::new(), Agent::reset()))
+        .run_with(|| (App::new(), Agent::reset()))
 }

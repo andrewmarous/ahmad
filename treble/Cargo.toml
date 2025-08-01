@@ -1,5 +1,5 @@
 [package]
-name = "plugin"
+name = "ahmad"
 version = "0.1.0"
 edition = "2024"
 
@@ -20,3 +20,11 @@ serde = { version = "1.0.219", default-features = true, features = ["derive"] }
 rfd = "0.15.4"
 serde_json = "1.0.141"
 bytes = "1.10.1"
+dirs = "6.0.0"
+cargo-bundle = "0.8.0"
+
+[package.metadata.bundle]
+name = "muse"
+identifier = "com.Andrew Marous.muse"
+icon = "assets/AppIcon.icns"
+resources = ["assets/data/*"]
