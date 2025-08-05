@@ -151,7 +151,7 @@ pub fn request_response_stream(
 
         let run_response = client
             .post(api_url("/run").expect("Given endpoint is invalid."))
-            .headers(headers)
+            .headers(headers.clone())
             .json(&payload)
             .send()
             .await?
@@ -160,11 +160,11 @@ pub fn request_response_stream(
 
         let response = loop {
             sleep(Duration::from_secs(10));
-            let endpoint = String::from("/status/");
+            let mut endpoint = String::from("/status/");
             endpoint.push_str(&run_response.id);
             let resp = client
                     .post(api_url(&endpoint[..]).expect("Given endpoint is invalid."))
-                    .headers(headers)
+                    .headers(headers.clone())
                     .send()
                     .await?
                     .json::<StatusResponse>()
