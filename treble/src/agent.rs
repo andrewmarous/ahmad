@@ -68,9 +68,9 @@ struct StatusResponse {
     id: String,
     status: String,
     #[serde(rename = "delayTime")]
-    delay_time: i16,
+    delay_time: Option<i64>,
     #[serde(rename = "executionTime")]
-    execution_time: i16,
+    execution_time: Option<i64>,
     output: Option<GenerationResponse>,
 }
 
@@ -149,27 +149,40 @@ pub fn request_response_stream(
         info!("built request payload.");
         sender.send(TaskResponse::Progress(66.0)).await?;
 
-        let run_response = client
+        let resp = client
             .post(api_url("/run").expect("Given endpoint is invalid."))
             .headers(headers.clone())
             .json(&payload)
             .send()
             .await?
-            .json::<RunResponse>()
+            .text()
             .await?;
+        let run_response = match serde_json::from_str::<RunResponse>(&resp) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Error deserializing run response: {}", resp);
+                return Err(Error::new(e));
+            }
+        };
 
         let response = loop {
-            sleep(Duration::from_secs(10));
+            let _ = sleep(Duration::from_secs(10));
             let mut endpoint = String::from("/status/");
             endpoint.push_str(&run_response.id);
             let resp = client
                     .post(api_url(&endpoint[..]).expect("Given endpoint is invalid."))
                     .headers(headers.clone())
                     .send()
-                    .await?
-                    .json::<StatusResponse>()
                     .await?;
-            if resp.status == "COMPLETED" { break resp; }
+            let resp_text = resp.text().await.unwrap_or(String::new());
+            let json = match serde_json::from_str::<StatusResponse>(&resp_text) {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Error deserializing status response: {}", resp_text);
+                    return Err(Error::new(e));
+                }
+            };
+            if json.status == "COMPLETED" { break json; }
         };
 
         let output: GenerationResponse = response.output
