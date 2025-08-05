@@ -71,6 +71,7 @@ struct StatusResponse {
     delay_time: i16,
     #[serde(rename = "executionTime")]
     execution_time: i16,
+    output: Option<GenerationResponse>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,24 +160,21 @@ pub fn request_response_stream(
 
         let response = loop {
             sleep(Duration::from_secs(10));
-            let endpoint = String::from("/status").push_str(&run_response.id);
+            let endpoint = String::from("/status/");
+            endpoint.push_str(&run_response.id);
             let resp = client
                     .post(api_url(&endpoint[..]).expect("Given endpoint is invalid."))
                     .headers(headers)
                     .send()
+                    .await?
+                    .json::<StatusResponse>()
                     .await?;
-            break 1;
+            if resp.status == "COMPLETED" { break resp; }
         };
 
-        let text = response.text().await?;
-        let response = match serde_json::from_str::<GenerationResponse>(&text) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                error!("Error deserializing response. Raw response text: {}", &text);
-                return Err(Error::new(e));
-            }
-        };
-        let bytes: Bytes = response.file_data.into_bytes().into();
+        let output: GenerationResponse = response.output
+            .expect("Output should not be None outside of loop.");
+        let bytes: Bytes = output.file_data.into_bytes().into();
 
         info!("received generate request.");
         sender.send(TaskResponse::Progress(99.0)).await?;
