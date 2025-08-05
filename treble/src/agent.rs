@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::fs::File;
 use tokio::io::{self, AsyncWriteExt};
+use tokio::time::sleep;
 use tracing::{error, info};
 use url::Url;
 
@@ -54,6 +55,22 @@ struct GenerationPayload<'a> {
     negative_prompt: &'a str,
     #[serde(rename = "output_filetype")]
     filetype: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct RunResponse {
+    id: String,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusResponse {
+    id: String,
+    status: String,
+    #[serde(rename = "delayTime")]
+    delay_time: i16,
+    #[serde(rename = "executionTime")]
+    execution_time: i16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,15 +144,29 @@ pub fn request_response_stream(
                 }),
             },
         };
+        info!("prompt: {}", &prompt[..]);
         info!("built request payload.");
         sender.send(TaskResponse::Progress(66.0)).await?;
 
-        let response = client
-            .post(api_url("").expect("Given endpoint is invalid."))
+        let run_response = client
+            .post(api_url("/run").expect("Given endpoint is invalid."))
             .headers(headers)
             .json(&payload)
             .send()
+            .await?
+            .json::<RunResponse>()
             .await?;
+
+        let response = loop {
+            sleep(Duration::from_secs(10));
+            let endpoint = String::from("/status").push_str(&run_response.id);
+            let resp = client
+                    .post(api_url(&endpoint[..]).expect("Given endpoint is invalid."))
+                    .headers(headers)
+                    .send()
+                    .await?;
+            break 1;
+        };
 
         let text = response.text().await?;
         let response = match serde_json::from_str::<GenerationResponse>(&text) {
