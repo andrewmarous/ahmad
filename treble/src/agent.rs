@@ -13,6 +13,7 @@ use tokio::io::{self, AsyncWriteExt};
 use tokio::time::sleep;
 use tracing::{error, info};
 use url::Url;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 use anyhow::Error;
 
@@ -187,8 +188,9 @@ pub fn request_response_stream(
 
         let output: GenerationResponse = response.output
             .expect("Output should not be None outside of loop.");
-        let bytes: Bytes = output.file_data.into_bytes().into();
-
+        let bytes: Bytes = {
+            STANDARD.decode(output.file_data).expect("Failed to decode base64 data").into()
+        };
         info!("received generate request.");
         sender.send(TaskResponse::Progress(99.0)).await?;
 

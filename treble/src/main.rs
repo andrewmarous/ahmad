@@ -193,7 +193,7 @@ impl Agent {
             move |res| match res {
                 Ok(tr) => match tr {
                     TaskResponse::Progress(pct) => Message::AgentProgressUpdated(pct),
-                    TaskResponse::String(s) => Message::AgentError(s),
+                    TaskResponse::String(s) => Message::ResponseComplete(s),
                 },
                 Err(e) => Message::AgentError(e.to_string()),
             },
@@ -282,7 +282,8 @@ impl App {
             }
             Message::ResponseComplete(user_msg) => {
                 state.errors.clear();
-                state.errors.push_str(&user_msg);
+                let msg = format!("Response generated: output file is {} bytes.", &user_msg);
+                state.errors.push_str(&msg[..]);
                 Task::none()
             }
             Message::Reset => {
