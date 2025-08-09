@@ -1,7 +1,13 @@
 .env
 
+.DS_Store
+
 
 # Added by cargo
 
 **/target
 **/logs
+
+*.wav
+*.mid
+*.midi
